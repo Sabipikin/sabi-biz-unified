@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "bash run.sh || node start-wrapper.js",
+    "start": "node start-wrapper.js",
     "dev": "node --watch src/server.js",
     "migrate": "node migrations/migrate.js",
     "seed": "node seeds/seed.js",

@@ -6,7 +6,7 @@ services:
     plan: free
     rootDir: backend
     buildCommand: npm install
-    startCommand: bash run.sh
+    startCommand: node start-wrapper.js
     envVars:
       - key: NODE_ENV
         value: production
