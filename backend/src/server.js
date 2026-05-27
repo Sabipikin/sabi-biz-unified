@@ -13,6 +13,7 @@ const cron = require('node-cron');
 
 // ─── IMPORTS ────────────────────────────────────────────────────────────
 const logger = require('./config/logger');
+const startupLogger = require('./config/startupLogger');
 const { query, testConnection } = require('./config/db');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 
@@ -182,8 +183,11 @@ httpServer.listen(PORT, '0.0.0.0', async () => {
   try {
     const now = await testConnection();
     if (now) logger.info(`DB test OK: ${JSON.stringify(now)}`);
+    startupLogger.info('Server started', { port: PORT });
+    startupLogger.info('Env snapshot', startupLogger.envSnapshot());
   } catch (err) {
     logger.error('DB test after listen failed:', err);
+    startupLogger.error('DB test after listen failed', err);
   }
 });
 
@@ -192,12 +196,14 @@ httpServer.listen(PORT, '0.0.0.0', async () => {
 process.on('unhandledRejection', (reason, promise) => {
   logger.error('Unhandled Rejection at:', { reason, promise });
   // keep process alive for investigation; Render will restart if needed
+  startupLogger.error('Unhandled Rejection', reason, { promise: !!promise });
 });
 
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught Exception:', err);
   // Give the log a moment to flush then exit with non-zero code so
   // Render restarts the service if the exception is unrecoverable.
+  startupLogger.error('Uncaught Exception', err);
   setTimeout(() => process.exit(1), 1000);
 });
 
