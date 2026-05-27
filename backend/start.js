@@ -1,72 +1,35 @@
 #!/usr/bin/env node
 
-// Write diagnostics to both stdout AND a persistent log file
-const fs = require('fs');
-const path = require('path');
+// Startup script - immediate console output, no file I/O initially
+console.log('[INIT] Process started at ' + new Date().toISOString());
+console.log('[INIT] PID: ' + process.pid);
+console.log('[INIT] Node: ' + process.version);
+console.log('[INIT] CWD: ' + process.cwd());
+console.log('[INIT] PORT: ' + (process.env.PORT || '3000'));
+console.log('[INIT] NODE_ENV: ' + (process.env.NODE_ENV || 'not set'));
 
-const logsDir = path.join(__dirname, 'logs');
-const logFile = path.join(logsDir, 'start.log');
-
-// Ensure logs directory exists
-try {
-  if (!fs.existsSync(logsDir)) {
-    fs.mkdirSync(logsDir, { recursive: true });
-  }
-} catch (e) {
-  console.error('[INIT-ERR] Failed to create logs dir:', e.message);
-}
-
-function logBoth(msg) {
-  console.log(msg);
-  try {
-    fs.appendFileSync(logFile, msg + '\n', { encoding: 'utf8' });
-  } catch (e) {
-    console.error('[LOG-ERR]', e.message);
-  }
-}
-
-function logError(msg) {
-  console.error(msg);
-  try {
-    fs.appendFileSync(logFile, 'ERROR: ' + msg + '\n', { encoding: 'utf8' });
-  } catch (e) {
-    console.error('[LOG-ERR]', e.message);
-  }
-}
-
-// Immediate diagnostics
-try {
-  logBoth('[INIT] ' + new Date().toISOString() + ' - Process started, PID: ' + process.pid);
-  logBoth('[INIT] Node version: ' + process.version);
-  logBoth('[INIT] CWD: ' + process.cwd());
-  logBoth('[INIT] PORT env: ' + (process.env.PORT || 'not set'));
-  logBoth('[INIT] NODE_ENV: ' + (process.env.NODE_ENV || 'not set'));
-  logBoth('[INIT] DATABASE_URL present: ' + !!process.env.DATABASE_URL);
-  logBoth('[INIT] DATABASE_URL length: ' + (process.env.DATABASE_URL ? process.env.DATABASE_URL.length : 0));
-} catch (e) {
-  console.error('[INIT-ERR] Early logging failed:', e.message);
-}
-
-// Add global error handlers BEFORE any require
+// Catch ANY unhandled errors IMMEDIATELY
 process.on('uncaughtException', (err) => {
-  logError('[FATAL] Uncaught exception: ' + err.message);
-  logError(err.stack);
+  console.error('[FATAL] Uncaught exception:', err.message);
+  if (err.stack) console.error(err.stack);
   process.exit(1);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  logError('[FATAL] Unhandled rejection: ' + reason);
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled rejection:', reason);
   process.exit(1);
 });
 
+// Load the application
 try {
-  logBoth('[INIT] Loading application...');
+  console.log('[INIT] Loading server...');
   require('./src/server.js');
-  logBoth('[INIT] Application loaded successfully');
+  console.log('[INIT] Server loaded successfully');
 } catch (err) {
-  logError('[FATAL] Application load failed: ' + err.message);
-  logError(err.stack);
+  console.error('[FATAL] Failed to load server:', err.message);
+  if (err.stack) console.error(err.stack);
   process.exit(1);
 }
+
 
 
