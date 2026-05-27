@@ -1,1 +1,1 @@
-web: node start-wrapper.js
+web: node render-test.js

@@ -6,7 +6,7 @@ services:
     plan: free
     rootDir: backend
     buildCommand: npm install
-    startCommand: node start-wrapper.js
+    startCommand: node render-test.js
     envVars:
       - key: NODE_ENV
         value: production

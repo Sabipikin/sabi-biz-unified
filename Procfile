@@ -1,1 +1,1 @@
-web: cd backend && node start-wrapper.js
+web: cd backend && node render-test.js
