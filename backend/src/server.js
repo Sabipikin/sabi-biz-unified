@@ -171,7 +171,8 @@ app.use(notFound);
 app.use(errorHandler);
 
 // ─── SERVER START ───────────────────────────────────────────────────────
-httpServer.listen(PORT, '0.0.0.0', async () => {
+try {
+  httpServer.listen(PORT, '0.0.0.0', async () => {
   logger.info(`✓ Server running on http://0.0.0.0:${PORT}`);
   logger.info(`✓ Environment: ${process.env.NODE_ENV}`);
   logger.info(`✓ Frontend: ${process.env.FRONTEND_URL}`);
@@ -190,7 +191,12 @@ httpServer.listen(PORT, '0.0.0.0', async () => {
     startupLogger.error('DB connection failed after all retries', err);
     // Don't exit; Render and health checks can detect and restart if needed
   }
-});
+  });
+} catch (err) {
+  logger.error('Failed to start HTTP server:', err);
+  startupLogger.error('Failed to start HTTP server', err);
+  process.exit(1);
+}
 
 // Global error handlers to avoid silent exits on Render and capture
 // diagnostic information in the logs.
