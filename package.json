@@ -1,0 +1,29 @@
+{
+  "name": "sabi-biz-unified",
+  "version": "1.0.0",
+  "description": "Unified SaaS platform - BizTrack + SabiReply merged",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend",
+    "admin"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=backend & npm run dev --workspace=frontend & npm run dev --workspace=admin",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:admin": "npm run dev --workspace=admin",
+    "install:all": "npm install && npm install --workspace=backend && npm install --workspace=frontend && npm install --workspace=admin",
+    "migrate": "npm run migrate --workspace=backend",
+    "seed": "npm run seed --workspace=backend",
+    "test": "npm test --workspace=backend"
+  },
+  "keywords": [
+    "saas",
+    "accounting",
+    "whatsapp",
+    "nigerian-businesses"
+  ],
+  "author": "Sabi Team",
+  "license": "MIT"
+}

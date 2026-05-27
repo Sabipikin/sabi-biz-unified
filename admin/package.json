@@ -1,0 +1,21 @@
+{
+  "name": "sabi-biz-admin",
+  "version": "1.0.0",
+  "description": "Admin dashboard for SaaS management",
+  "type": "module",
+  "scripts": {
+    "dev": "node -e \"console.log('Starting dev server on http://localhost:5174')\" && npx http-server ./public -p 5174 -g",
+    "build": "echo 'Admin is vanilla JS - no build needed'",
+    "serve": "npx http-server ./public -p 5174"
+  },
+  "keywords": [
+    "admin",
+    "dashboard",
+    "saas"
+  ],
+  "author": "Sabi Team",
+  "license": "MIT",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}

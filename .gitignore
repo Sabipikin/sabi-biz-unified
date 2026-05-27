@@ -1,0 +1,85 @@
+# .gitignore for Sabi Biz Unified
+
+# ─── Node/NPM ──────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# ─── Environment ───────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.production
+
+# ─── Editor ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+.project
+.classpath
+*.sublime-project
+*.sublime-workspace
+
+# ─── Backend ───────────────────────────────────────────────────────────
+backend/logs/
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+backend/dist/
+backend/build/
+backend/.nyc_output/
+backend/coverage/
+
+# ─── Frontend ──────────────────────────────────────────────────────────
+frontend/dist/
+frontend/build/
+frontend/.cache/
+
+# ─── Admin ────────────────────────────────────────────────────────────
+admin/dist/
+admin/build/
+admin/.cache/
+
+# ─── Docker ────────────────────────────────────────────────────────────
+.dockerignore
+
+# ─── OS Files ──────────────────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+*.log
+
+# ─── Test Coverage ────────────────────────────────────────────────────
+coverage/
+.coverage
+htmlcov/
+
+# ─── Temp Files ───────────────────────────────────────────────────────
+tmp/
+temp/
+*.tmp
+.cache/
+
+# ─── Build/Output ────────────────────────────────────────────────────
+dist/
+build/
+out/
+
+# ─── IDE ──────────────────────────────────────────────────────────────
+*.iml
+.gradle/
+*.swp
+*.swo
+
+# ─── Secrets ───────────────────────────────────────────────────────────
+*.pem
+*.key
+*.p8
+*.p12

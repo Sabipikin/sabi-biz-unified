@@ -1,0 +1,21 @@
+{
+  "name": "sabi-biz-frontend",
+  "version": "1.0.0",
+  "description": "SaaS user application - web and mobile PWA",
+  "type": "module",
+  "scripts": {
+    "dev": "node -e \"console.log('Starting dev server on http://localhost:5173')\" && npx http-server ./public -p 5173 -g",
+    "build": "echo 'Frontend is vanilla JS - no build needed'",
+    "serve": "npx http-server ./public -p 5173"
+  },
+  "keywords": [
+    "pwa",
+    "saas",
+    "accounting"
+  ],
+  "author": "Sabi Team",
+  "license": "MIT",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
