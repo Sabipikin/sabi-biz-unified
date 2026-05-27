@@ -6,7 +6,7 @@ services:
     plan: free
     rootDir: backend
     buildCommand: npm install
-    startCommand: node render-test.js
+    startCommand: node render.js
     envVars:
       - key: NODE_ENV
         value: production
