@@ -15,6 +15,7 @@ const cron = require('node-cron');
 const logger = require('./config/logger');
 const startupLogger = require('./config/startupLogger');
 const { query, testConnection } = require('./config/db');
+const { ensureDbConnected } = require('./config/dbRetry');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 
 // ─── ROUTES ────────────────────────────────────────────────────────────
@@ -176,18 +177,18 @@ httpServer.listen(PORT, '0.0.0.0', async () => {
   logger.info(`✓ Frontend: ${process.env.FRONTEND_URL}`);
   logger.info(`✓ Admin: ${process.env.ADMIN_URL}`);
 
-  // Test DB connection after the server is listening so failures don't
-  // prevent the process from binding to the port (Render requires a
-  // listening port to consider the service healthy). Log errors but
-  // don't crash the process here.
+  // Test DB connection with retries after the server is listening so
+  // failures don't prevent the process from binding to the port (Render
+  // requires a listening port to consider the service healthy).
   try {
-    const now = await testConnection();
-    if (now) logger.info(`DB test OK: ${JSON.stringify(now)}`);
-    startupLogger.info('Server started', { port: PORT });
+    const now = await ensureDbConnected(5);
+    logger.info(`✓ DB connected after retries: ${JSON.stringify(now)}`);
+    startupLogger.info('Server started with DB connected', { port: PORT });
     startupLogger.info('Env snapshot', startupLogger.envSnapshot());
   } catch (err) {
-    logger.error('DB test after listen failed:', err);
-    startupLogger.error('DB test after listen failed', err);
+    logger.error('DB connection failed after all retries:', err);
+    startupLogger.error('DB connection failed after all retries', err);
+    // Don't exit; Render and health checks can detect and restart if needed
   }
 });
 
