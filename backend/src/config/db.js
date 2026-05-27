@@ -82,6 +82,7 @@ exports.closePool = async () => {
 
 module.exports = {
   query: exports.query,
+  testConnection: exports.testConnection,
   getClient: exports.getClient,
   closePool: exports.closePool,
   pool,
