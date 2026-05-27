@@ -13,7 +13,7 @@ const cron = require('node-cron');
 
 // ─── IMPORTS ────────────────────────────────────────────────────────────
 const logger = require('./config/logger');
-const { query } = require('./config/db');
+const { query, testConnection } = require('./config/db');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 
 // ─── ROUTES ────────────────────────────────────────────────────────────
@@ -169,11 +169,36 @@ app.use(notFound);
 app.use(errorHandler);
 
 // ─── SERVER START ───────────────────────────────────────────────────────
-httpServer.listen(PORT, () => {
-  logger.info(`✓ Server running on http://localhost:${PORT}`);
+httpServer.listen(PORT, '0.0.0.0', async () => {
+  logger.info(`✓ Server running on http://0.0.0.0:${PORT}`);
   logger.info(`✓ Environment: ${process.env.NODE_ENV}`);
   logger.info(`✓ Frontend: ${process.env.FRONTEND_URL}`);
   logger.info(`✓ Admin: ${process.env.ADMIN_URL}`);
+
+  // Test DB connection after the server is listening so failures don't
+  // prevent the process from binding to the port (Render requires a
+  // listening port to consider the service healthy). Log errors but
+  // don't crash the process here.
+  try {
+    const now = await testConnection();
+    if (now) logger.info(`DB test OK: ${JSON.stringify(now)}`);
+  } catch (err) {
+    logger.error('DB test after listen failed:', err);
+  }
+});
+
+// Global error handlers to avoid silent exits on Render and capture
+// diagnostic information in the logs.
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection at:', { reason, promise });
+  // keep process alive for investigation; Render will restart if needed
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception:', err);
+  // Give the log a moment to flush then exit with non-zero code so
+  // Render restarts the service if the exception is unrecoverable.
+  setTimeout(() => process.exit(1), 1000);
 });
 
 // ─── GRACEFUL SHUTDOWN ──────────────────────────────────────────────────
