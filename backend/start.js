@@ -1,35 +1,37 @@
 #!/usr/bin/env node
 
-// Startup script - immediate console output, no file I/O initially
-console.log('[INIT] Process started at ' + new Date().toISOString());
-console.log('[INIT] PID: ' + process.pid);
-console.log('[INIT] Node: ' + process.version);
-console.log('[INIT] CWD: ' + process.cwd());
-console.log('[INIT] PORT: ' + (process.env.PORT || '3000'));
-console.log('[INIT] NODE_ENV: ' + (process.env.NODE_ENV || 'not set'));
+// Force unbuffered output
+process.stderr.write('[INIT] ===== BACKEND STARTING =====\n');
+process.stderr.write('[INIT] Process started at ' + new Date().toISOString() + '\n');
+process.stderr.write('[INIT] PID: ' + process.pid + '\n');
+process.stderr.write('[INIT] Node: ' + process.version + '\n');
+process.stderr.write('[INIT] CWD: ' + process.cwd() + '\n');
+process.stderr.write('[INIT] PORT: ' + (process.env.PORT || '3000') + '\n');
+process.stderr.write('[INIT] NODE_ENV: ' + (process.env.NODE_ENV || 'not set') + '\n');
 
 // Catch ANY unhandled errors IMMEDIATELY
 process.on('uncaughtException', (err) => {
-  console.error('[FATAL] Uncaught exception:', err.message);
-  if (err.stack) console.error(err.stack);
+  process.stderr.write('[FATAL] Uncaught exception: ' + err.message + '\n');
+  if (err.stack) process.stderr.write(err.stack + '\n');
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[FATAL] Unhandled rejection:', reason);
+  process.stderr.write('[FATAL] Unhandled rejection: ' + String(reason) + '\n');
   process.exit(1);
 });
 
 // Load the application
 try {
-  console.log('[INIT] Loading server...');
+  process.stderr.write('[INIT] Loading server...\n');
   require('./src/server.js');
-  console.log('[INIT] Server loaded successfully');
+  process.stderr.write('[INIT] Server loaded successfully\n');
 } catch (err) {
-  console.error('[FATAL] Failed to load server:', err.message);
-  if (err.stack) console.error(err.stack);
+  process.stderr.write('[FATAL] Failed to load server: ' + err.message + '\n');
+  if (err.stack) process.stderr.write(err.stack + '\n');
   process.exit(1);
 }
+
 
 
 
