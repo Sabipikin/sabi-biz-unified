@@ -9,6 +9,7 @@
     "admin"
   ],
   "scripts": {
+    "start": "cd backend && bash run.sh",
     "dev": "npm run dev --workspace=backend & npm run dev --workspace=frontend & npm run dev --workspace=admin",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
