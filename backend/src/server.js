@@ -156,12 +156,6 @@ app.use('/api/webhooks', routes.webhooks);
 app.use('/api/admin', routes.admin);
 app.use('/api/analytics', routes.analytics);
 
-// ─── STATIC FILES ───────────────────────────────────────────────────────
-// Serve frontend and admin if they exist
-const path = require('path');
-app.use(express.static(path.join(__dirname, '../../frontend/public')));
-app.use('/admin', express.static(path.join(__dirname, '../../admin/public')));
-
 // ─── SCHEDULED TASKS ────────────────────────────────────────────────────
 // Run database cleanup every hour
 cron.schedule('0 * * * *', async () => {

@@ -112,6 +112,17 @@ html, body {
   box-shadow: 0 10px 20px rgba(79, 70, 229, 0.3);
 }
 
+.error-message {
+  background: #FEE2E2;
+  border: 1px solid #FECACA;
+  color: #991B1B;
+  padding: 12px 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
 .auth-footer {
   text-align: center;
   margin-top: 20px;
