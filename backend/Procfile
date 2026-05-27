@@ -1,1 +1,1 @@
-web: node render-test.js
+web: npm start
