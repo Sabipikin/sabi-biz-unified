@@ -28,17 +28,23 @@ pool.on('error', (err) => {
   logger.error('Unexpected error on idle client', err);
 });
 
-// Test connection
-pool.query('SELECT NOW()', (err, result) => {
-  if (err) {
-    logger.error(`Database connection failed: ${err.message || err}`);
-    if (err.stack) {
-      logger.error(err.stack);
-    }
-  } else {
+// NOTE: avoid performing a blocking test query on import. Some hosting
+// environments will cause DNS resolution errors during module initialization
+// which can crash the process. Expose a helper to test the connection
+// explicitly from the application startup code where failures can be
+// handled gracefully.
+
+exports.testConnection = async () => {
+  try {
+    const res = await pool.query('SELECT NOW()');
     logger.info('Database connected successfully');
+    return res.rows[0];
+  } catch (err) {
+    logger.error(`Database connection failed: ${err.message || err}`);
+    if (err.stack) logger.error(err.stack);
+    return null;
   }
-});
+};
 
 /**
  * Execute a query with parameterized statements (prevents SQL injection)
