@@ -1,7 +1,10 @@
 // backend/src/server.js
 // Main application entry point
 
+console.log('[STARTUP] Loading .env...');
 require('dotenv').config();
+
+console.log('[STARTUP] Loading core dependencies...');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -12,14 +15,20 @@ const { Server } = require('socket.io');
 const cron = require('node-cron');
 
 // ─── IMPORTS ────────────────────────────────────────────────────────────
+console.log('[STARTUP] Loading config modules...');
 const logger = require('./config/logger');
 const startupLogger = require('./config/startupLogger');
+console.log('[STARTUP] Loading db module...');
 const { query, testConnection } = require('./config/db');
+console.log('[STARTUP] Loading dbRetry module...');
 const { ensureDbConnected } = require('./config/dbRetry');
+console.log('[STARTUP] Loading middleware...');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 
 // ─── ROUTES ────────────────────────────────────────────────────────────
+console.log('[STARTUP] Loading routes...');
 const routes = require('./routes');
+console.log('[STARTUP] All modules loaded successfully');
 
 // ─── SERVER SETUP ───────────────────────────────────────────────────────
 const app = express();
