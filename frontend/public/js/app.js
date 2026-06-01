@@ -61,8 +61,17 @@ function logout() {
 
 // Get current page from URL hash
 function getCurrentPage() {
-  const hash = window.location.hash.replace(/^#\/?/, '') || 'login';
-  return hash.split('/')[0] || 'login';
+  const hash = window.location.hash.replace(/^#\/?/, '');
+  if (hash) {
+    return hash.split('/')[0] || 'login';
+  }
+
+  const path = window.location.pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
+  if (path === 'register' || path.endsWith('/register.html')) {
+    return 'register';
+  }
+
+  return window.SABIBIZ_INITIAL_ROUTE || 'login';
 }
 
 // Render app
@@ -256,7 +265,7 @@ function renderApp() {
           </form>
           
           <p class="auth-footer">
-            Don't have an account? <a href="#/register">Sign up here for 2 weeks free</a>
+            Don't have an account? <a href="./register.html">Sign up here for 2 weeks free</a>
           </p>
         </div>
       </div>
