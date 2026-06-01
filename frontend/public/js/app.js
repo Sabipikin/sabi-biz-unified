@@ -302,6 +302,33 @@ function renderApp() {
       });
     }
   }
+
+  setupPasswordToggles();
+}
+
+function setupPasswordToggles() {
+  document.querySelectorAll('input[type="password"]').forEach(input => {
+    if (input.parentElement?.classList.contains('password-field')) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'password-field';
+    input.parentNode.insertBefore(wrapper, input);
+    wrapper.appendChild(input);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'password-toggle';
+    button.textContent = 'Show';
+    button.setAttribute('aria-label', `Show ${input.name || 'password'}`);
+    wrapper.appendChild(button);
+
+    button.addEventListener('click', () => {
+      const shouldShow = input.type === 'password';
+      input.type = shouldShow ? 'text' : 'password';
+      button.textContent = shouldShow ? 'Hide' : 'Show';
+      button.setAttribute('aria-label', `${shouldShow ? 'Hide' : 'Show'} ${input.name || 'password'}`);
+    });
+  });
 }
 
 // Initial render

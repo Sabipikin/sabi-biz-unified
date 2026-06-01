@@ -47,7 +47,7 @@ function renderLogin() {
         <form id="adminLoginForm">
           <div class="form-group">
             <label for="email">Email</label>
-            <input type="email" id="email" name="email" required placeholder="admin@sabibiz.com">
+            <input type="email" id="email" name="email" required placeholder="admin@sabipikin.xyz">
           </div>
 
           <div class="form-group">
@@ -60,6 +60,8 @@ function renderLogin() {
       </div>
     </div>
   `;
+
+  setupPasswordToggles();
 
   const loginForm = document.getElementById('adminLoginForm');
   loginForm.addEventListener('submit', async (e) => {
@@ -80,6 +82,31 @@ function renderLogin() {
     } else {
       alert(response?.message || 'Admin access denied or invalid credentials');
     }
+  });
+}
+
+function setupPasswordToggles() {
+  document.querySelectorAll('input[type="password"]').forEach(input => {
+    if (input.parentElement?.classList.contains('password-field')) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'password-field';
+    input.parentNode.insertBefore(wrapper, input);
+    wrapper.appendChild(input);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'password-toggle';
+    button.textContent = 'Show';
+    button.setAttribute('aria-label', `Show ${input.name || 'password'}`);
+    wrapper.appendChild(button);
+
+    button.addEventListener('click', () => {
+      const shouldShow = input.type === 'password';
+      input.type = shouldShow ? 'text' : 'password';
+      button.textContent = shouldShow ? 'Hide' : 'Show';
+      button.setAttribute('aria-label', `${shouldShow ? 'Hide' : 'Show'} ${input.name || 'password'}`);
+    });
   });
 }
 

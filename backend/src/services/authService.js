@@ -118,10 +118,48 @@ exports.login = async ({ email, password }) => {
       throw new ValidationError('Email and password required');
     }
 
-    // Find user
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Admin users live in a separate table from customer accounts, but use
+    // the same JWT shape so the admin dashboard can keep its existing flow.
+    const adminResult = await query(
+      `SELECT id, name, email, password_hash, role, status
+       FROM admin_users
+       WHERE email = $1`,
+      [normalizedEmail]
+    );
+
+    if (adminResult.rows.length > 0) {
+      const admin = adminResult.rows[0];
+      const isValidAdmin = await bcrypt.compare(password, admin.password_hash);
+
+      if (!isValidAdmin || admin.status !== 'active') {
+        throw new ValidationError('Invalid email or password');
+      }
+
+      await query(
+        'UPDATE admin_users SET last_login_at = NOW(), updated_at = NOW() WHERE id = $1',
+        [admin.id]
+      );
+
+      logger.info(`Admin logged in: ${normalizedEmail}`);
+
+      return {
+        user: {
+          id: admin.id,
+          name: admin.name,
+          email: admin.email,
+          role: admin.role,
+          account_type: 'admin',
+        },
+        token: this.generateJWT(admin.id, admin.email, admin.role),
+      };
+    }
+
+    // Find customer user
     const result = await query(
       'SELECT * FROM users WHERE email = $1',
-      [email.toLowerCase()]
+      [normalizedEmail]
     );
 
     if (result.rows.length === 0) {
@@ -142,7 +180,7 @@ exports.login = async ({ email, password }) => {
       [user.id]
     );
 
-    logger.info(`User logged in: ${email}`);
+    logger.info(`User logged in: ${normalizedEmail}`);
 
     // Generate JWT
     const token = this.generateJWT(user.id, user.email, user.role);
