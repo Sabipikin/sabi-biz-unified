@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node -e \"console.log('Starting dev server on http://localhost:5174')\" && npx http-server ./public -p 5174 -g",
-    "build": "echo 'Admin is vanilla JS - no build needed'",
+    "build": "node scripts/write-env.cjs",
     "serve": "npx http-server ./public -p 5174"
   },
   "keywords": [

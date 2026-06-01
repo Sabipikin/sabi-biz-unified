@@ -4,9 +4,24 @@
 console.log('🚀 SabiBiz Frontend Loading...');
 
 // API configuration
-const API_BASE = window.location.origin === 'http://localhost:3000' || window.location.origin === 'http://localhost:5173'
-  ? 'http://localhost:3000'
-  : window.location.origin;
+function resolveApiBaseUrl() {
+  const configuredUrl =
+    window.SABIBIZ_API_BASE_URL ||
+    localStorage.getItem('SABIBIZ_API_BASE_URL') ||
+    '';
+
+  if (configuredUrl.trim()) {
+    return configuredUrl.replace(/\/+$/, '');
+  }
+
+  if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+    return 'http://localhost:3000';
+  }
+
+  return 'https://sabi-biz-backend.onrender.com';
+}
+
+const API_BASE = resolveApiBaseUrl();
 
 const API = {
   baseURL: API_BASE,

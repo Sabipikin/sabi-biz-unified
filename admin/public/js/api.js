@@ -1,9 +1,24 @@
 // admin/public/js/api.js
 // Admin API client
 
-const API_BASE = window.location.origin === 'http://localhost:5174'
-  ? 'http://localhost:3000'
-  : window.location.origin;
+function resolveAdminApiBaseUrl() {
+  const configuredUrl =
+    window.SABIBIZ_API_BASE_URL ||
+    localStorage.getItem('SABIBIZ_API_BASE_URL') ||
+    '';
+
+  if (configuredUrl.trim()) {
+    return configuredUrl.replace(/\/+$/, '');
+  }
+
+  if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+    return 'http://localhost:3000';
+  }
+
+  return 'https://sabi-biz-backend.onrender.com';
+}
+
+const API_BASE = resolveAdminApiBaseUrl();
 
 const AdminAPI = {
   baseURL: API_BASE,

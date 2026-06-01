@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node render-test.js || node server.js",
+    "start": "node render.js",
     "dev": "node --watch src/server.js",
     "migrate": "node migrations/migrate.js",
     "seed": "node seeds/seed.js",
@@ -45,6 +45,6 @@
     "nodemon": "^3.0.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "20.x"
   }
 }

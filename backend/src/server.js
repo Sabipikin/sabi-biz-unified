@@ -35,10 +35,47 @@ const app = express();
 const httpServer = createServer(app);
 const PORT = process.env.PORT || 3000;
 
+function csvEnv(name) {
+  return (process.env[name] || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+}
+
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.ADMIN_URL,
+  ...csvEnv('FRONTEND_URLS'),
+  ...csvEnv('ADMIN_URLS'),
+  ...csvEnv('CORS_ORIGINS'),
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3000',
+].filter(Boolean);
+
+function isAllowedOrigin(origin) {
+  if (!origin) {
+    return true;
+  }
+
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+
+  try {
+    const hostname = new URL(origin).hostname;
+    return hostname.endsWith('.netlify.app') && process.env.ALLOW_NETLIFY_PREVIEWS === 'true';
+  } catch (err) {
+    return false;
+  }
+}
+
 // ─── SOCKET.IO ──────────────────────────────────────────────────────────
 const io = new Server(httpServer, {
   cors: {
-    origin: [process.env.FRONTEND_URL, process.env.ADMIN_URL, 'http://localhost:5173', 'http://localhost:5174'],
+    origin: (origin, callback) => {
+      callback(null, isAllowedOrigin(origin));
+    },
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -75,15 +112,7 @@ app.use(helmet({
 
 app.use(cors({
   origin: (origin, callback) => {
-    const allowedOrigins = [
-      process.env.FRONTEND_URL,
-      process.env.ADMIN_URL,
-      'http://localhost:5173',
-      'http://localhost:5174',
-      'http://localhost:3000',
-    ].filter(Boolean);
-
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (isAllowedOrigin(origin)) {
       callback(null, true);
     } else {
       logger.warn(`CORS blocked origin: ${origin}`);
@@ -92,6 +121,24 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'SabiBiz API is running',
+    health: '/health',
+    live: '/live',
+  });
+});
+
+app.get('/live', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Server is listening',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  });
+});
 
 // ─── BODY PARSING ───────────────────────────────────────────────────────
 // Raw body for webhook signature verification (Paystack, PayPal)

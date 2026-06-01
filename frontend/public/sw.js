@@ -1,18 +1,15 @@
 // frontend/public/sw.js
 // Service Worker for offline support
 
-const CACHE_NAME = 'sabibiz-pwa-v1';
+const CACHE_NAME = 'sabibiz-pwa-v2';
 const urlsToCache = [
   '/',
   '/index.html',
   '/offline.html',
   '/css/main.css',
+  '/env.js',
   '/js/app.js',
   '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/icon-maskable-192.png',
-  '/icons/icon-maskable-512.png',
 ];
 
 self.addEventListener('install', (event) => {
@@ -45,7 +42,10 @@ self.addEventListener('fetch', (event) => {
   const requestUrl = new URL(event.request.url);
   const isSameOrigin = requestUrl.origin === self.location.origin;
 
-  if (isSameOrigin && requestUrl.pathname.startsWith('/api/')) {
+  if (
+    requestUrl.pathname.startsWith('/api/') ||
+    (isSameOrigin && requestUrl.pathname === '/env.js')
+  ) {
     return;
   }
 
