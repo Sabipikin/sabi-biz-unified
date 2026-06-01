@@ -61,7 +61,7 @@ function logout() {
 
 // Get current page from URL hash
 function getCurrentPage() {
-  const hash = window.location.hash.slice(1) || '/login';
+  const hash = window.location.hash.replace(/^#\/?/, '') || 'login';
   return hash.split('/')[0] || 'login';
 }
 
