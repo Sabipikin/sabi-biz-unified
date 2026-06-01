@@ -1,1 +1,1 @@
-web: cd backend && node render-test.js
+web: cd backend && node render.js
