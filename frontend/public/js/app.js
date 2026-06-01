@@ -38,19 +38,24 @@ const API = {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      headers,
-    });
+    let response;
+    try {
+      response = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers,
+      });
+    } catch (err) {
+      return { success: false, message: err?.message || 'Network error' };
+    }
 
     let payload;
     try {
       payload = await response.json();
     } catch (err) {
-      payload = { success: response.ok, message: response.statusText };
+      payload = { success: response.ok, message: response.statusText || '' };
     }
 
-    if (response.status === 401) {
+    if (response && response.status === 401) {
       localStorage.removeItem('token');
       window.location.hash = '#/login';
     }
