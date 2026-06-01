@@ -9,7 +9,7 @@ const logger = require('../config/logger');
  * Usage: app.use(errorHandler)
  */
 exports.errorHandler = (err, req, res, next) => {
-  const status = err.status || 500;
+  const status = err.status || err.statusCode || 500;
   const message = err.message || 'Internal server error';
 
   // Log error

@@ -256,4 +256,68 @@ exports.getUserById = async (userId) => {
   }
 };
 
+exports.updateProfile = async (userId, updates) => {
+  const name = updates.name?.trim();
+  const email = updates.email?.toLowerCase().trim();
+  const phone = updates.phone?.trim() || null;
+  const shopName = updates.shop_name?.trim() || null;
+  const businessType = updates.business_type?.trim() || null;
+
+  if (!name || !email) {
+    throw new ValidationError('Name and email are required');
+  }
+
+  const result = await query(
+    `UPDATE users
+     SET name = $2,
+         email = $3,
+         phone = $4,
+         shop_name = $5,
+         business_type = $6,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING id, name, email, phone, shop_name, business_type, role, subscription_plan, subscription_status, status, created_at`,
+    [userId, name, email, phone, shopName, businessType]
+  );
+
+  if (result.rows.length === 0) {
+    throw new NotFoundError('User');
+  }
+
+  return result.rows[0];
+};
+
+exports.updatePassword = async (userId, { currentPassword, newPassword }) => {
+  if (!currentPassword || !newPassword) {
+    throw new ValidationError('Current password and new password are required');
+  }
+
+  if (newPassword.length < 6) {
+    throw new ValidationError('New password must be at least 6 characters');
+  }
+
+  const result = await query(
+    'SELECT id, password_hash FROM users WHERE id = $1',
+    [userId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new NotFoundError('User');
+  }
+
+  const user = result.rows[0];
+  const isValid = await bcrypt.compare(currentPassword, user.password_hash);
+  if (!isValid) {
+    throw new ValidationError('Current password is incorrect');
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await query(
+    'UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1',
+    [userId, passwordHash]
+  );
+
+  return { updated: true };
+};
+
 module.exports = exports;
