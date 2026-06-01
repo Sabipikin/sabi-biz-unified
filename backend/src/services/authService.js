@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, getClient } = require('../config/db');
 const logger = require('../config/logger');
 const { ValidationError, NotFoundError } = require('../utils/errors');
+const adminUserService = require('./adminUserService');
 
 /**
  * Register a new user
@@ -122,6 +123,8 @@ exports.login = async ({ email, password }) => {
 
     // Admin users live in a separate table from customer accounts, but use
     // the same JWT shape so the admin dashboard can keep its existing flow.
+    await adminUserService.ensureAdminUsersTable();
+
     const adminResult = await query(
       `SELECT id, name, email, password_hash, role, status
        FROM admin_users

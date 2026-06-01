@@ -22,6 +22,7 @@ console.log('[STARTUP] Loading db module...');
 const { query, testConnection } = require('./config/db');
 console.log('[STARTUP] Loading dbRetry module...');
 const { ensureDbConnected } = require('./config/dbRetry');
+const adminUserService = require('./services/adminUserService');
 console.log('[STARTUP] Loading middleware...');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 
@@ -234,6 +235,8 @@ try {
   try {
     const now = await ensureDbConnected(5);
     logger.info(`✓ DB connected after retries: ${JSON.stringify(now)}`);
+    const admin = await adminUserService.ensureSuperAdmin();
+    logger.info(`✓ Super admin ready: ${admin.email}`);
     startupLogger.info('Server started with DB connected', { port: PORT });
     startupLogger.info('Env snapshot', startupLogger.envSnapshot());
   } catch (err) {
