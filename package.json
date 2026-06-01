@@ -26,5 +26,8 @@
     "nigerian-businesses"
   ],
   "author": "Sabi Team",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer": "^25.1.0"
+  }
 }
