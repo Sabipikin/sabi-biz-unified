@@ -4,7 +4,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
-const { query } = require('../config/db');
+const { query, getClient } = require('../config/db');
 const logger = require('../config/logger');
 const { ValidationError, NotFoundError } = require('../utils/errors');
 
@@ -12,16 +12,21 @@ const { ValidationError, NotFoundError } = require('../utils/errors');
  * Register a new user
  */
 exports.register = async ({ name, email, password, phone }) => {
+  let client;
+
   try {
     // Validate inputs
     if (!email || !password || !name) {
       throw new ValidationError('Missing required fields');
     }
 
+    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedPhone = phone && phone.trim() ? phone.trim() : null;
+
     // Check if user exists
     const existing = await query(
       'SELECT id FROM users WHERE email = $1',
-      [email.toLowerCase()]
+      [normalizedEmail]
     );
 
     if (existing.rows.length > 0) {
@@ -33,18 +38,74 @@ exports.register = async ({ name, email, password, phone }) => {
 
     // Create user
     const userId = uuidv4();
-    const result = await query(
-      `INSERT INTO users (id, name, email, phone, password_hash, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-       RETURNING id, name, email, phone, role, status`,
-      [userId, name, email.toLowerCase(), phone, passwordHash]
+    const trialStartedAt = new Date();
+    const trialEndsAt = new Date(trialStartedAt);
+    trialEndsAt.setDate(trialEndsAt.getDate() + 14);
+
+    client = await getClient();
+    await client.query('BEGIN');
+
+    const result = await client.query(
+      `INSERT INTO users (
+         id, name, email, phone, password_hash,
+         subscription_plan, subscription_status, subscription_expires_at,
+         created_at, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+       RETURNING id, name, email, phone, role, status, subscription_plan, subscription_status, subscription_expires_at`,
+      [
+        userId,
+        name.trim(),
+        normalizedEmail,
+        normalizedPhone,
+        passwordHash,
+        'trial',
+        'active',
+        trialEndsAt,
+      ]
     );
 
-    logger.info(`User registered: ${email}`);
-    return result.rows[0];
+    await client.query(
+      `INSERT INTO subscriptions (
+         id, user_id, plan, payment_method, status, amount, currency, billing_cycle,
+         next_billing_date, last_payment_date, created_at, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, $10, $10)`,
+      [
+        uuidv4(),
+        userId,
+        'trial',
+        'free_trial',
+        'active',
+        0,
+        'NGN',
+        'trial',
+        trialEndsAt,
+        trialStartedAt,
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    const user = result.rows[0];
+    const token = this.generateJWT(user.id, user.email, user.role);
+
+    logger.info(`User registered with 14-day trial: ${normalizedEmail}`);
+    return { user, token };
   } catch (err) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackErr) {
+        logger.error('Registration rollback failed:', rollbackErr);
+      }
+    }
     logger.error('Registration error:', err);
     throw err;
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 };
 

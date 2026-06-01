@@ -112,6 +112,13 @@ html, body {
   box-shadow: 0 10px 20px rgba(79, 70, 229, 0.3);
 }
 
+.btn-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+  transform: none;
+  box-shadow: none;
+}
+
 .error-message {
   background: #FEE2E2;
   border: 1px solid #FECACA;
@@ -121,6 +128,17 @@ html, body {
   margin-bottom: 20px;
   font-size: 14px;
   font-weight: 500;
+}
+
+.trial-banner {
+  background: #ECFDF5;
+  border: 1px solid #A7F3D0;
+  color: #065F46;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .auth-footer {

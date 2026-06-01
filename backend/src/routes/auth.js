@@ -11,7 +11,12 @@ const { authMiddleware } = require('../middleware/auth');
 router.post('/register', async (req, res, next) => {
   try {
     const result = await authService.register(req.body);
-    res.status(201).json({ success: true, data: result });
+    res.status(201).json({
+      success: true,
+      token: result.token,
+      user: result.user,
+      data: result,
+    });
   } catch (err) {
     next(err);
   }

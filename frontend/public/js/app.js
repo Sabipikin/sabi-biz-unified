@@ -120,7 +120,8 @@ function renderApp() {
       <div class="auth-container">
         <div class="auth-box">
           <h1>SabiBiz</h1>
-          <p>Create Your Business Account</p>
+          <p>Create your account and start a 14-day free trial.</p>
+          <div class="trial-banner">No payment required. Full access for 2 weeks.</div>
           
           <div id="errorMessage" class="error-message" style="display: none;"></div>
           
@@ -150,7 +151,7 @@ function renderApp() {
               <input type="password" id="confirmPassword" name="confirmPassword" required placeholder="••••••••">
             </div>
             
-            <button type="submit" class="btn-primary">Create Account</button>
+            <button type="submit" class="btn-primary" id="signupButton">Start Free Trial</button>
           </form>
           
           <p class="auth-footer">
@@ -163,10 +164,13 @@ function renderApp() {
     // Handle signup
     const signupForm = document.getElementById('signupForm');
     const errorDiv = document.getElementById('errorMessage');
+    const signupButton = document.getElementById('signupButton');
     
     signupForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       errorDiv.style.display = 'none';
+      signupButton.disabled = true;
+      signupButton.textContent = 'Creating account...';
       
       const name = document.getElementById('name').value.trim();
       const email = document.getElementById('email').value.trim();
@@ -178,18 +182,24 @@ function renderApp() {
       if (!name || !email || !password) {
         errorDiv.textContent = 'Name, email, and password are required';
         errorDiv.style.display = 'block';
+        signupButton.disabled = false;
+        signupButton.textContent = 'Start Free Trial';
         return;
       }
       
       if (password !== confirmPassword) {
         errorDiv.textContent = 'Passwords do not match';
         errorDiv.style.display = 'block';
+        signupButton.disabled = false;
+        signupButton.textContent = 'Start Free Trial';
         return;
       }
       
       if (password.length < 6) {
         errorDiv.textContent = 'Password must be at least 6 characters';
         errorDiv.style.display = 'block';
+        signupButton.disabled = false;
+        signupButton.textContent = 'Start Free Trial';
         return;
       }
       
@@ -197,30 +207,28 @@ function renderApp() {
         const response = await API.auth.register({ name, email, phone, password });
         const data = await response.json();
         
-        if (data.success) {
-          // Auto-login after signup
-          const loginResponse = await API.auth.login({ email, password });
-          const loginData = await loginResponse.json();
-          
-          if (loginData.token) {
-            setToken(loginData.token);
-            window.location.href = '#/dashboard';
-            setTimeout(() => window.location.reload(), 100);
-          } else {
-            errorDiv.textContent = 'Account created! Please sign in.';
-            errorDiv.style.display = 'block';
-            setTimeout(() => {
-              window.location.href = '#/login';
-              renderApp();
-            }, 1500);
-          }
+        if (data.success && (data.token || data.data?.token)) {
+          setToken(data.token || data.data.token);
+          window.location.href = '#/dashboard';
+          renderApp();
+        } else if (data.success) {
+          errorDiv.textContent = 'Account created! Please sign in.';
+          errorDiv.style.display = 'block';
+          setTimeout(() => {
+            window.location.href = '#/login';
+            renderApp();
+          }, 1500);
         } else {
           errorDiv.textContent = data.message || 'Signup failed. Please try again.';
           errorDiv.style.display = 'block';
+          signupButton.disabled = false;
+          signupButton.textContent = 'Start Free Trial';
         }
       } catch (err) {
         errorDiv.textContent = 'Error: ' + err.message;
         errorDiv.style.display = 'block';
+        signupButton.disabled = false;
+        signupButton.textContent = 'Start Free Trial';
       }
     });
   } else {
@@ -248,7 +256,7 @@ function renderApp() {
           </form>
           
           <p class="auth-footer">
-            Don't have an account? <a href="#/register">Sign up here</a>
+            Don't have an account? <a href="#/register">Sign up here for 2 weeks free</a>
           </p>
         </div>
       </div>
