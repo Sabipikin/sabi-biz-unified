@@ -9,6 +9,7 @@
     "dev": "node --watch src/server.js",
     "migrate": "node migrations/migrate.js",
     "seed": "node seeds/seed.js",
+    "seed:super-admin": "node scripts/ensure-super-admin.js",
     "test": "jest --coverage",
     "test:watch": "jest --watch",
     "lint": "eslint src/",

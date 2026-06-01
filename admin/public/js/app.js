@@ -73,7 +73,7 @@ function renderLogin() {
       body: JSON.stringify({ email, password }),
     });
 
-    if (response?.token && response.user?.role === 'admin') {
+    if (response?.token && ['admin', 'super_admin'].includes(response.user?.role)) {
       setAdminToken(response.token);
       window.location.hash = defaultRoute;
       initializeAdminUI();

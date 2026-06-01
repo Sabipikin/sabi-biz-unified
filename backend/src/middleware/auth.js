@@ -50,7 +50,9 @@ exports.authMiddleware = (req, res, next) => {
  * Usage: router.use(authMiddleware, adminMiddleware)
  */
 exports.adminMiddleware = (req, res, next) => {
-  if (req.user?.role !== 'admin') {
+  const adminRoles = ['admin', 'super_admin'];
+
+  if (!adminRoles.includes(req.user?.role)) {
     logger.warn('Unauthorized admin access attempt', { userId: req.user?.id });
     return res.status(403).json({
       success: false,
