@@ -364,18 +364,21 @@ async function navigateDashboard(route) {
 }
 
 async function renderOverview() {
-  const [invoicesRes, inventoryRes] = await Promise.all([
+  const [invoicesRes, inventoryRes, salesAnalyticsRes] = await Promise.all([
     API.business.invoices(),
     API.business.inventory(),
+    API.business.salesAnalytics(),
   ]);
   const analyticsRes = await API.analytics.metrics();
 
   const invoices = getResponseData(invoicesRes);
   const inventory = getResponseData(inventoryRes);
+  const salesAnalytics = getResponseData(salesAnalyticsRes, {});
   const metrics = getResponseData(analyticsRes);
   const errors = [
     getResponseError(invoicesRes, 'Invoices could not be loaded.'),
     getResponseError(inventoryRes, 'Inventory could not be loaded.'),
+    getResponseError(salesAnalyticsRes, 'Sales analytics could not be loaded.'),
     getResponseError(analyticsRes, 'Analytics could not be loaded.'),
   ].filter(Boolean);
   const revenue = invoices
@@ -399,6 +402,30 @@ async function renderOverview() {
         <div class="stat-card">
           <h3>Inventory Items</h3>
           <p class="stat-number">${inventory.length}</p>
+        </div>
+        <div class="stat-card">
+          <h3>Total Sales</h3>
+          <p class="stat-number">${formatMoney(salesAnalytics.total_sales)}</p>
+        </div>
+        <div class="stat-card">
+          <h3>Total Profit</h3>
+          <p class="stat-number">${formatMoney(salesAnalytics.total_profit)}</p>
+        </div>
+        <div class="stat-card">
+          <h3>Avg Margin</h3>
+          <p class="stat-number">${salesAnalytics.avg_margin != null ? `${salesAnalytics.avg_margin.toFixed(2)}%` : '-'}</p>
+        </div>
+        <div class="stat-card">
+          <h3>Total Loss</h3>
+          <p class="stat-number">${formatMoney(salesAnalytics.total_loss)}</p>
+        </div>
+        <div class="stat-card">
+          <h3>Best Product</h3>
+          <p class="stat-number">${escapeHtml(salesAnalytics.top_product || '-')}</p>
+        </div>
+        <div class="stat-card">
+          <h3>Top Sale Time</h3>
+          <p class="stat-number">${escapeHtml(salesAnalytics.highest_sale_time || '-')}</p>
         </div>
       </div>
       ${renderRecentMetrics(metrics)}
