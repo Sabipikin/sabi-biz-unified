@@ -43,4 +43,31 @@ router.post('/inventory', authMiddleware, async (req, res, next) => {
   }
 });
 
+router.get('/sales', authMiddleware, async (req, res, next) => {
+  try {
+    const sales = await businessService.getSales(req.user.userId);
+    res.json({ success: true, data: sales });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/sales', authMiddleware, async (req, res, next) => {
+  try {
+    const sale = await businessService.createSale(req.user.userId, req.body);
+    res.status(201).json({ success: true, data: sale });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/sales/analytics', authMiddleware, async (req, res, next) => {
+  try {
+    const analytics = await businessService.getSalesAnalytics(req.user.userId);
+    res.json({ success: true, data: analytics });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

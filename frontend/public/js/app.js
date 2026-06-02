@@ -26,6 +26,7 @@ const defaultRoute = '#/dashboard';
 const pendingRouteKey = 'SABIBIZ_PENDING_ROUTE';
 const dashboardRoutes = new Set([
   'dashboard',
+  'sales',
   'invoices',
   'inventory',
   'whatsapp',
@@ -104,6 +105,12 @@ const API = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+    sales: () => API.request('/api/business/sales'),
+    createSale: (data) => API.request('/api/business/sales', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    salesAnalytics: () => API.request('/api/business/sales/analytics'),
   },
 
   whatsapp: {
@@ -306,6 +313,7 @@ function renderDashboardShell() {
           <a href="#/dashboard" data-route="dashboard">Dashboard</a>
           <a href="#/invoices" data-route="invoices">Invoices</a>
           <a href="#/inventory" data-route="inventory">Inventory</a>
+          <a href="#/sales" data-route="sales">Sales</a>
           <a href="#/whatsapp" data-route="whatsapp">WhatsApp</a>
           <a href="#/subscriptions" data-route="subscriptions">Subscriptions</a>
           <a href="#/settings" data-route="settings">Settings</a>
@@ -340,6 +348,8 @@ async function navigateDashboard(route) {
     await renderInvoices();
   } else if (route === 'inventory') {
     await renderInventory();
+  } else if (route === 'sales') {
+    await renderSales();
   } else if (route === 'whatsapp') {
     renderWhatsApp();
   } else if (route === 'subscriptions') {
@@ -553,6 +563,10 @@ async function renderInventory() {
           <input id="unitPrice" name="unit_price" type="number" min="0" step="0.01">
         </div>
         <div class="form-group">
+          <label for="costPrice">Cost Price</label>
+          <input id="costPrice" name="cost_price" type="number" min="0" step="0.01">
+        </div>
+        <div class="form-group">
           <label for="reorderLevel">Reorder Level</label>
           <input id="reorderLevel" name="reorder_level" type="number" min="0" value="10">
         </div>
@@ -596,6 +610,7 @@ function renderInventoryTable(items) {
             <th>Product</th>
             <th>Quantity</th>
             <th>Unit Price</th>
+            <th>Cost Price</th>
             <th>Reorder</th>
             <th>Supplier</th>
           </tr>
@@ -606,8 +621,192 @@ function renderInventoryTable(items) {
               <td>${escapeHtml(item.product_name || '-')}</td>
               <td>${Number(item.quantity || 0)}</td>
               <td>${formatMoney(item.unit_price)}</td>
+              <td>${formatMoney(item.cost_price)}</td>
               <td>${Number(item.reorder_level || 0)}</td>
               <td>${escapeHtml(item.supplier || '-')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function renderSales() {
+  const [inventoryRes, salesRes, analyticsRes] = await Promise.all([
+    API.business.inventory(),
+    API.business.sales(),
+    API.business.salesAnalytics(),
+  ]);
+
+  const inventory = getResponseData(inventoryRes);
+  const sales = getResponseData(salesRes);
+  const analytics = getResponseData(analyticsRes, {});
+
+  const errors = [
+    getResponseError(inventoryRes, 'Inventory could not be loaded.'),
+    getResponseError(salesRes, 'Sales could not be loaded.'),
+    getResponseError(analyticsRes, 'Sales analytics could not be loaded.'),
+  ].filter(Boolean);
+
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Sales</h2>
+          <p>Record daily sales and review the performance of your products.</p>
+        </div>
+      </div>
+      ${errors.length ? renderSectionError(errors.join(' ')) : ''}
+      <div class="sales-layout">
+        <div class="sales-form-panel">
+          <form id="salesForm" class="form-grid">
+            <div class="form-group">
+              <label for="saleProduct">Product</label>
+              <select id="saleProduct" name="inventory_id" required>
+                <option value="">Select product</option>
+                ${inventory.map(item => `
+                  <option value="${item.id}"
+                    data-unit-price="${item.unit_price || 0}"
+                    data-cost-price="${item.cost_price || 0}">
+                    ${escapeHtml(item.product_name || '-')}
+                  </option>
+                `).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="saleDate">Sale Date</label>
+              <input id="saleDate" name="sale_date" type="date" value="${new Date().toISOString().slice(0, 10)}" required>
+            </div>
+            <div class="form-group">
+              <label for="saleUnit">Unit</label>
+              <input id="saleUnit" name="unit" required placeholder="pcs, kg, bundle">
+            </div>
+            <div class="form-group">
+              <label for="saleQuantity">Quantity</label>
+              <input id="saleQuantity" name="quantity" type="number" min="1" value="1" required>
+            </div>
+            <div class="form-group">
+              <label for="saleUnitPrice">Unit Price</label>
+              <input id="saleUnitPrice" name="unit_price" type="number" min="0" step="0.01" required>
+            </div>
+            <div class="form-group">
+              <label for="saleCostPrice">Cost Price</label>
+              <input id="saleCostPrice" name="cost_price" type="number" min="0" step="0.01">
+            </div>
+            <div class="form-group">
+              <label for="saleTotal">Total Amount</label>
+              <input id="saleTotal" name="total_amount" type="number" min="0" step="0.01" required>
+            </div>
+            <button type="submit" class="btn-primary form-action">Record Sale</button>
+          </form>
+        </div>
+
+        <div class="sales-summary-panel">
+          <h3>Sales Analytics</h3>
+          <div class="stats">
+            <div class="stat-card">
+              <h4>Total Revenue</h4>
+              <p class="stat-number">${formatMoney(analytics.total_sales)}</p>
+            </div>
+            <div class="stat-card">
+              <h4>Total Profit</h4>
+              <p class="stat-number">${formatMoney(analytics.total_profit)}</p>
+            </div>
+            <div class="stat-card">
+              <h4>Avg Margin</h4>
+              <p class="stat-number">${analytics.avg_margin != null ? `${analytics.avg_margin.toFixed(2)}%` : '-'}</p>
+            </div>
+            <div class="stat-card">
+              <h4>Total Loss</h4>
+              <p class="stat-number">${formatMoney(analytics.total_loss)}</p>
+            </div>
+            <div class="stat-card">
+              <h4>Best Product</h4>
+              <p class="stat-number">${escapeHtml(analytics.top_product || '-')}</p>
+            </div>
+            <div class="stat-card">
+              <h4>Top Sale Time</h4>
+              <p class="stat-number">${escapeHtml(analytics.highest_sale_time || '-')}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      ${renderSalesTable(sales)}
+    </div>
+  `;
+
+  const saleProduct = document.getElementById('saleProduct');
+  const saleQuantity = document.getElementById('saleQuantity');
+  const saleUnitPrice = document.getElementById('saleUnitPrice');
+  const saleCostPrice = document.getElementById('saleCostPrice');
+  const saleTotal = document.getElementById('saleTotal');
+
+  const syncSaleTotal = () => {
+    const quantity = Number(saleQuantity?.value || 0);
+    const unitPrice = Number(saleUnitPrice?.value || 0);
+    saleTotal.value = (quantity * unitPrice).toFixed(2);
+  };
+
+  saleProduct?.addEventListener('change', () => {
+    const selectedOption = saleProduct.selectedOptions[0];
+    if (!selectedOption) return;
+    saleUnitPrice.value = selectedOption.dataset.unitPrice || '';
+    saleCostPrice.value = selectedOption.dataset.costPrice || '';
+    syncSaleTotal();
+  });
+
+  saleQuantity?.addEventListener('input', syncSaleTotal);
+  saleUnitPrice?.addEventListener('input', syncSaleTotal);
+
+  document.getElementById('salesForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
+    formData.quantity = Number(formData.quantity || 0);
+    formData.unit_price = Number(formData.unit_price || 0);
+    formData.cost_price = Number(formData.cost_price || 0);
+    formData.total_amount = Number(formData.total_amount || (formData.quantity * formData.unit_price));
+
+    const result = await API.business.createSale(formData);
+    if (result?.success) {
+      notify('Sale recorded successfully.');
+      await renderSales();
+    } else {
+      notify(result?.message || 'Unable to record sale.', 'error');
+    }
+  });
+}
+
+function renderSalesTable(sales) {
+  if (!sales.length) {
+    return '<div class="empty-state">No sales recorded yet.</div>';
+  }
+
+  return `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Unit</th>
+            <th>Quantity</th>
+            <th>Unit Price</th>
+            <th>Total</th>
+            <th>Profit</th>
+            <th>Sale Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sales.map(sale => `
+            <tr>
+              <td>${escapeHtml(sale.product_name || '-')}</td>
+              <td>${escapeHtml(sale.unit || '-')}</td>
+              <td>${Number(sale.quantity || 0)}</td>
+              <td>${formatMoney(sale.unit_price)}</td>
+              <td>${formatMoney(sale.total_amount)}</td>
+              <td>${formatMoney(sale.profit)}</td>
+              <td>${formatDate(sale.sale_date || sale.sale_time)}</td>
             </tr>
           `).join('')}
         </tbody>
