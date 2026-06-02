@@ -102,6 +102,25 @@ const API = {
       body: JSON.stringify(data),
     }),
   },
+
+  analytics: {
+    metrics: () => API.request('/api/analytics'),
+  },
+
+  subscriptions: {
+    list: () => API.request('/api/subscriptions'),
+    subscribe: (data) => API.request('/api/subscriptions/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  },
+
+  payments: {
+    initializePaystack: (data) => API.request('/api/payments/paystack/initialize', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  },
 };
 
 function isLoggedIn() {
@@ -153,6 +172,33 @@ function formatDate(value) {
   return value ? new Date(value).toLocaleDateString() : '-';
 }
 
+function getResponseData(response, fallback = []) {
+  if (!response?.success) return fallback;
+  return response.data ?? fallback;
+}
+
+function getResponseError(response, fallback = 'Unable to load this section.') {
+  return response?.success ? '' : response?.message || fallback;
+}
+
+function setButtonLoading(button, isLoading, loadingText) {
+  if (!button) return;
+
+  if (isLoading) {
+    button.dataset.originalText = button.textContent;
+    button.textContent = loadingText;
+    button.disabled = true;
+  } else {
+    button.textContent = button.dataset.originalText || button.textContent;
+    button.disabled = false;
+    delete button.dataset.originalText;
+  }
+}
+
+function renderSectionError(message) {
+  return `<div class="section-alert">${escapeHtml(message)}</div>`;
+}
+
 function notify(message, type = 'success') {
   const notice = document.getElementById('notice');
   if (!notice) return;
@@ -169,7 +215,12 @@ function renderApp() {
   applyTheme();
   const page = getCurrentPage();
 
-  if (isLoggedIn() && page !== 'login' && page !== 'register') {
+  if (isLoggedIn() && (page === 'login' || page === 'register')) {
+    window.location.hash = defaultRoute;
+    return;
+  }
+
+  if (isLoggedIn()) {
     renderDashboardShell();
     navigateDashboard(page);
   } else if (page === 'register') {
@@ -193,6 +244,7 @@ function renderDashboardShell() {
           <a href="#/invoices" data-route="invoices">Invoices</a>
           <a href="#/inventory" data-route="inventory">Inventory</a>
           <a href="#/whatsapp" data-route="whatsapp">WhatsApp</a>
+          <a href="#/subscriptions" data-route="subscriptions">Subscriptions</a>
           <a href="#/settings" data-route="settings">Settings</a>
           <button type="button" id="logoutButton">Logout</button>
         </div>
@@ -227,6 +279,8 @@ async function navigateDashboard(route) {
     await renderInventory();
   } else if (route === 'whatsapp') {
     renderWhatsApp();
+  } else if (route === 'subscriptions') {
+    await renderSubscriptions();
   } else if (route === 'settings') {
     await renderSettings();
   } else {
@@ -241,9 +295,16 @@ async function renderOverview() {
     API.business.invoices(),
     API.business.inventory(),
   ]);
+  const analyticsRes = await API.analytics.metrics();
 
-  const invoices = invoicesRes?.data || [];
-  const inventory = inventoryRes?.data || [];
+  const invoices = getResponseData(invoicesRes);
+  const inventory = getResponseData(inventoryRes);
+  const metrics = getResponseData(analyticsRes);
+  const errors = [
+    getResponseError(invoicesRes, 'Invoices could not be loaded.'),
+    getResponseError(inventoryRes, 'Inventory could not be loaded.'),
+    getResponseError(analyticsRes, 'Analytics could not be loaded.'),
+  ].filter(Boolean);
   const revenue = invoices
     .filter(invoice => invoice.status === 'paid')
     .reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
@@ -252,6 +313,7 @@ async function renderOverview() {
     <div class="welcome">
       <h2>Dashboard</h2>
       <p>Your business activity at a glance.</p>
+      ${errors.length ? renderSectionError(errors.join(' ')) : ''}
       <div class="stats">
         <div class="stat-card">
           <h3>Invoices</h3>
@@ -266,13 +328,47 @@ async function renderOverview() {
           <p class="stat-number">${inventory.length}</p>
         </div>
       </div>
+      ${renderRecentMetrics(metrics)}
+    </div>
+  `;
+}
+
+function renderRecentMetrics(metrics) {
+  if (!metrics.length) {
+    return '';
+  }
+
+  return `
+    <div class="subsection">
+      <h3>Recent Metrics</h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th>Value</th>
+              <th>Period</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${metrics.slice(0, 5).map(metric => `
+              <tr>
+                <td>${escapeHtml(metric.metric_type || '-')}</td>
+                <td>${escapeHtml(metric.metric_value ?? '-')}</td>
+                <td>${formatDate(metric.period_date)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
     </div>
   `;
 }
 
 async function renderInvoices() {
   const response = await API.business.invoices();
-  const invoices = response?.data || [];
+  const invoices = getResponseData(response);
+  const error = getResponseError(response, 'Invoices could not be loaded.');
 
   document.getElementById('content').innerHTML = `
     <div class="panel">
@@ -313,12 +409,15 @@ async function renderInvoices() {
         </div>
         <button type="submit" class="btn-primary form-action">Create Invoice</button>
       </form>
+      ${error ? renderSectionError(error) : ''}
       ${renderInvoiceTable(invoices)}
     </div>
   `;
 
   document.getElementById('invoiceForm').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Creating...');
     const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
     const result = await API.business.createInvoice(formData);
     if (result?.success) {
@@ -326,6 +425,7 @@ async function renderInvoices() {
       await renderInvoices();
     } else {
       notify(result?.message || 'Unable to create invoice.', 'error');
+      setButtonLoading(submitButton, false);
     }
   });
 }
@@ -365,7 +465,8 @@ function renderInvoiceTable(invoices) {
 
 async function renderInventory() {
   const response = await API.business.inventory();
-  const items = response?.data || [];
+  const items = getResponseData(response);
+  const error = getResponseError(response, 'Inventory could not be loaded.');
 
   document.getElementById('content').innerHTML = `
     <div class="panel">
@@ -398,12 +499,15 @@ async function renderInventory() {
         </div>
         <button type="submit" class="btn-primary form-action">Add Item</button>
       </form>
+      ${error ? renderSectionError(error) : ''}
       ${renderInventoryTable(items)}
     </div>
   `;
 
   document.getElementById('inventoryForm').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Adding...');
     const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
     const result = await API.business.createInventoryItem(formData);
     if (result?.success) {
@@ -411,6 +515,7 @@ async function renderInventory() {
       await renderInventory();
     } else {
       notify(result?.message || 'Unable to add inventory item.', 'error');
+      setButtonLoading(submitButton, false);
     }
   });
 }
@@ -480,6 +585,8 @@ function renderWhatsApp() {
 
   document.getElementById('whatsappForm').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Sending...');
     const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
     formData.useAI = formData.useAI === 'true';
     const result = await API.whatsapp.send(formData);
@@ -489,7 +596,102 @@ function renderWhatsApp() {
     } else {
       notify(result?.message || 'Unable to send WhatsApp message.', 'error');
     }
+    setButtonLoading(submitButton, false);
   });
+}
+
+async function renderSubscriptions() {
+  const response = await API.subscriptions.list();
+  const subscriptions = getResponseData(response);
+  const error = getResponseError(response, 'Subscriptions could not be loaded.');
+
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Subscriptions</h2>
+          <p>Review your plan history or start a monthly plan.</p>
+        </div>
+      </div>
+      <form id="subscriptionForm" class="form-grid">
+        <div class="form-group">
+          <label for="plan">Plan</label>
+          <select id="plan" name="plan" required>
+            <option value="starter">Starter - NGN 2,990/mo</option>
+            <option value="growth">Growth - NGN 4,990/mo</option>
+            <option value="pro">Pro - NGN 9,990/mo</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="paymentMethod">Payment Method</label>
+          <select id="paymentMethod" name="paymentMethod">
+            <option value="manual">Manual</option>
+            <option value="paystack">Paystack</option>
+          </select>
+        </div>
+        <button type="submit" class="btn-primary form-action">Start Subscription</button>
+      </form>
+      ${error ? renderSectionError(error) : ''}
+      ${renderSubscriptionTable(subscriptions)}
+    </div>
+  `;
+
+  document.getElementById('subscriptionForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Starting...');
+    const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const result = formData.paymentMethod === 'paystack'
+      ? await API.payments.initializePaystack({ plan: formData.plan })
+      : await API.subscriptions.subscribe(formData);
+
+    if (result?.success) {
+      const paymentUrl = result.data?.authorization_url;
+      if (paymentUrl) {
+        window.location.href = paymentUrl;
+        return;
+      }
+
+      notify('Subscription started.');
+      await renderSubscriptions();
+    } else {
+      notify(result?.message || 'Unable to start subscription.', 'error');
+      setButtonLoading(submitButton, false);
+    }
+  });
+}
+
+function renderSubscriptionTable(subscriptions) {
+  if (!subscriptions.length) {
+    return '<div class="empty-state">No subscriptions yet.</div>';
+  }
+
+  return `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Plan</th>
+            <th>Status</th>
+            <th>Payment</th>
+            <th>Started</th>
+            <th>Expires</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${subscriptions.map(subscription => `
+            <tr>
+              <td>${escapeHtml(subscription.plan || '-')}</td>
+              <td><span class="status ${escapeHtml(subscription.status || 'draft')}">${escapeHtml(subscription.status || '-')}</span></td>
+              <td>${escapeHtml(subscription.payment_method || '-')}</td>
+              <td>${formatDate(subscription.started_at || subscription.created_at)}</td>
+              <td>${formatDate(subscription.expires_at)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 async function renderSettings() {
@@ -558,6 +760,8 @@ async function renderSettings() {
 
   document.getElementById('profileForm').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Saving...');
     const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
     const result = await API.auth.updateMe(formData);
     if (result?.success) {
@@ -565,10 +769,13 @@ async function renderSettings() {
     } else {
       notify(result?.message || 'Unable to update details.', 'error');
     }
+    setButtonLoading(submitButton, false);
   });
 
   document.getElementById('passwordForm').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Updating...');
     const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
     const result = await API.auth.updatePassword(formData);
     if (result?.success) {
@@ -578,6 +785,7 @@ async function renderSettings() {
     } else {
       notify(result?.message || 'Unable to update password.', 'error');
     }
+    setButtonLoading(submitButton, false);
   });
 
   document.querySelectorAll('input[name="theme"]').forEach(input => {

@@ -348,6 +348,16 @@ html, body {
   font-weight: 700;
 }
 
+.subsection {
+  margin-top: 28px;
+}
+
+.subsection h3 {
+  color: var(--text);
+  font-size: 18px;
+  margin-bottom: 14px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -403,7 +413,17 @@ html, body {
   color: var(--success);
 }
 
+.status.active {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--success);
+}
+
 .status.sent {
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--warning);
+}
+
+.status.pending {
   background: rgba(245, 158, 11, 0.14);
   color: var(--warning);
 }
@@ -431,6 +451,17 @@ html, body {
   background: #FEE2E2;
   border-color: #FECACA;
   color: #991B1B;
+}
+
+.section-alert {
+  background: #FFFBEB;
+  border: 1px solid #FDE68A;
+  border-radius: 8px;
+  color: #92400E;
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 20px;
+  padding: 12px 15px;
 }
 
 .settings-grid {
