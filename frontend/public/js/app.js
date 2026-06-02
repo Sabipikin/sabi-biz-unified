@@ -498,7 +498,7 @@ function renderSalesTrendSection(trend) {
         </div>
         <div class="sales-trend-summary ${trendDirection}">
           <span>${trendDirection === 'up' ? '▲' : '▼'}</span>
-          <strong>${change.toFixed(1)}%</strong>
+          <span class="trend-badge ${trendDirection}">${change.toFixed(1)}%</span>
           <small>vs yesterday</small>
         </div>
       </div>
