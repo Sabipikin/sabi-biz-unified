@@ -23,6 +23,7 @@ function resolveApiBaseUrl() {
 const API_BASE = resolveApiBaseUrl();
 const app = document.getElementById('app');
 const defaultRoute = '#/dashboard';
+const pendingRouteKey = 'SABIBIZ_PENDING_ROUTE';
 const dashboardRoutes = new Set([
   'dashboard',
   'invoices',
@@ -170,6 +171,22 @@ function getDefaultDashboardHash() {
   return `#/${getDefaultDashboardRoute()}`;
 }
 
+function getRouteHash(route) {
+  return `#/${route}`;
+}
+
+function isRegisterPath() {
+  const path = window.location.pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
+  return path === 'register' || path.endsWith('/register.html');
+}
+
+function redirectDashboardHashToAppShell(route) {
+  const appUrl = window.SABIBIZ_APP_URL || `${window.location.origin}/`;
+  const target = new URL(appUrl, window.location.href);
+  target.hash = getRouteHash(route);
+  window.location.replace(target.toString());
+}
+
 function getCurrentPage() {
   if (window.location.hash) {
     return normalizeRouteName(window.location.hash);
@@ -243,6 +260,11 @@ function renderApp() {
   applyTheme();
   const page = getCurrentPage();
 
+  if (window.location.hash && isRegisterPath() && dashboardRoutes.has(page)) {
+    redirectDashboardHashToAppShell(page);
+    return;
+  }
+
   if (isLoggedIn() && !window.location.hash) {
     window.location.hash = getDefaultDashboardHash();
     return;
@@ -261,6 +283,9 @@ function renderApp() {
   if (isLoggedIn()) {
     renderDashboardShell();
     navigateDashboard(page);
+  } else if (dashboardRoutes.has(page)) {
+    localStorage.setItem(pendingRouteKey, getRouteHash(page));
+    renderLogin();
   } else if (page === 'register') {
     renderRegister();
   } else {
@@ -871,7 +896,9 @@ function renderLogin() {
 
     if (response?.token) {
       setToken(response.token);
-      window.location.hash = defaultRoute;
+      const pendingRoute = localStorage.getItem(pendingRouteKey);
+      localStorage.removeItem(pendingRouteKey);
+      window.location.hash = pendingRoute || defaultRoute;
       renderApp();
     } else {
       errorDiv.textContent = response?.message || 'Login failed';

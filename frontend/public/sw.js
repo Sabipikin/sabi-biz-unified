@@ -1,7 +1,7 @@
 // frontend/public/sw.js
 // Service Worker for offline support
 
-const CACHE_NAME = 'sabibiz-pwa-v3';
+const CACHE_NAME = 'sabibiz-pwa-v4';
 const urlsToCache = [
   '/',
   '/index.html',
