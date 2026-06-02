@@ -403,32 +403,47 @@ async function renderOverview() {
           <h3>Inventory Items</h3>
           <p class="stat-number">${inventory.length}</p>
         </div>
-        <div class="stat-card">
-          <h3>Total Sales</h3>
-          <p class="stat-number">${formatMoney(salesAnalytics.total_sales)}</p>
+      </div>
+      ${renderSalesOverviewSection(salesAnalytics)}
+      ${renderRecentMetrics(metrics)}
+    </div>
+  `;
+}
+
+function renderSalesOverviewSection(analytics) {
+  if (!analytics || Object.keys(analytics).length === 0) {
+    return '';
+  }
+
+  return `
+    <div class="subsection compact-overview">
+      <h3>Sales Overview</h3>
+      <div class="overview-grid">
+        <div class="overview-card">
+          <h4>Total Revenue</h4>
+          <p>${formatMoney(analytics.total_sales)}</p>
         </div>
-        <div class="stat-card">
-          <h3>Total Profit</h3>
-          <p class="stat-number">${formatMoney(salesAnalytics.total_profit)}</p>
+        <div class="overview-card">
+          <h4>Total Profit</h4>
+          <p>${formatMoney(analytics.total_profit)}</p>
         </div>
-        <div class="stat-card">
-          <h3>Avg Margin</h3>
-          <p class="stat-number">${salesAnalytics.avg_margin != null ? `${salesAnalytics.avg_margin.toFixed(2)}%` : '-'}</p>
+        <div class="overview-card">
+          <h4>Avg Margin</h4>
+          <p>${analytics.avg_margin != null ? `${analytics.avg_margin.toFixed(2)}%` : '-'}</p>
         </div>
-        <div class="stat-card">
-          <h3>Total Loss</h3>
-          <p class="stat-number">${formatMoney(salesAnalytics.total_loss)}</p>
+        <div class="overview-card">
+          <h4>Total Loss</h4>
+          <p>${formatMoney(analytics.total_loss)}</p>
         </div>
-        <div class="stat-card">
-          <h3>Best Product</h3>
-          <p class="stat-number">${escapeHtml(salesAnalytics.top_product || '-')}</p>
+        <div class="overview-card">
+          <h4>Best Product</h4>
+          <p>${escapeHtml(analytics.top_product || '-')}</p>
         </div>
-        <div class="stat-card">
-          <h3>Top Sale Time</h3>
-          <p class="stat-number">${escapeHtml(salesAnalytics.highest_sale_time || '-')}</p>
+        <div class="overview-card">
+          <h4>Top Sale Time</h4>
+          <p>${escapeHtml(analytics.highest_sale_time || '-')}</p>
         </div>
       </div>
-      ${renderRecentMetrics(metrics)}
     </div>
   `;
 }
