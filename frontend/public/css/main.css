@@ -408,10 +408,34 @@ html, body {
 
 .trend-badge.up {
   background: rgba(16, 185, 129, 0.9);
+  animation: badgePulseUp 1.6s ease-in-out infinite;
 }
 
 .trend-badge.down {
   background: rgba(239, 68, 68, 0.9);
+  animation: badgePulseDown 1.6s ease-in-out infinite;
+}
+
+@keyframes badgePulseUp {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    transform: translateY(-1px) scale(1.05);
+    box-shadow: 0 8px 20px -12px rgba(16, 185, 129, 0.9);
+  }
+}
+
+@keyframes badgePulseDown {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    transform: translateY(1px) scale(1.05);
+    box-shadow: 0 8px 20px -12px rgba(239, 68, 68, 0.9);
+  }
 }
 
 .sales-trend-summary small {
