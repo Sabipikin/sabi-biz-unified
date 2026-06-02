@@ -23,6 +23,15 @@ function resolveApiBaseUrl() {
 const API_BASE = resolveApiBaseUrl();
 const app = document.getElementById('app');
 const defaultRoute = '#/dashboard';
+const dashboardRoutes = new Set([
+  'dashboard',
+  'invoices',
+  'inventory',
+  'whatsapp',
+  'subscriptions',
+  'settings',
+]);
+const authRoutes = new Set(['login', 'register']);
 
 const API = {
   baseURL: API_BASE,
@@ -141,10 +150,29 @@ function logout() {
   renderApp();
 }
 
+function normalizeRouteName(route) {
+  const normalized = String(route || '')
+    .trim()
+    .replace(/^#\/?/, '')
+    .replace(/^\/+/, '')
+    .split('/')[0]
+    .toLowerCase();
+
+  return normalized || 'login';
+}
+
+function getDefaultDashboardRoute() {
+  const configuredRoute = normalizeRouteName(window.SABIBIZ_INITIAL_ROUTE || defaultRoute);
+  return dashboardRoutes.has(configuredRoute) ? configuredRoute : 'dashboard';
+}
+
+function getDefaultDashboardHash() {
+  return `#/${getDefaultDashboardRoute()}`;
+}
+
 function getCurrentPage() {
-  const hash = window.location.hash.replace(/^#\/?/, '');
-  if (hash) {
-    return hash.split('/')[0] || 'login';
+  if (window.location.hash) {
+    return normalizeRouteName(window.location.hash);
   }
 
   const path = window.location.pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
@@ -152,7 +180,7 @@ function getCurrentPage() {
     return 'register';
   }
 
-  return window.SABIBIZ_INITIAL_ROUTE || 'login';
+  return 'login';
 }
 
 function escapeHtml(value = '') {
@@ -215,8 +243,18 @@ function renderApp() {
   applyTheme();
   const page = getCurrentPage();
 
-  if (isLoggedIn() && (page === 'login' || page === 'register')) {
-    window.location.hash = defaultRoute;
+  if (isLoggedIn() && !window.location.hash) {
+    window.location.hash = getDefaultDashboardHash();
+    return;
+  }
+
+  if (isLoggedIn() && authRoutes.has(page)) {
+    window.location.hash = getDefaultDashboardHash();
+    return;
+  }
+
+  if (isLoggedIn() && !dashboardRoutes.has(page)) {
+    window.location.hash = getDefaultDashboardHash();
     return;
   }
 
