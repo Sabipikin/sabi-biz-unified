@@ -364,26 +364,30 @@ async function navigateDashboard(route) {
 }
 
 async function renderOverview() {
-  const [invoicesRes, inventoryRes, salesAnalyticsRes] = await Promise.all([
+  const [invoicesRes, inventoryRes, salesRes, salesAnalyticsRes] = await Promise.all([
     API.business.invoices(),
     API.business.inventory(),
+    API.business.sales(),
     API.business.salesAnalytics(),
   ]);
   const analyticsRes = await API.analytics.metrics();
 
   const invoices = getResponseData(invoicesRes);
   const inventory = getResponseData(inventoryRes);
+  const sales = getResponseData(salesRes);
   const salesAnalytics = getResponseData(salesAnalyticsRes, {});
   const metrics = getResponseData(analyticsRes);
   const errors = [
     getResponseError(invoicesRes, 'Invoices could not be loaded.'),
     getResponseError(inventoryRes, 'Inventory could not be loaded.'),
+    getResponseError(salesRes, 'Sales could not be loaded.'),
     getResponseError(salesAnalyticsRes, 'Sales analytics could not be loaded.'),
     getResponseError(analyticsRes, 'Analytics could not be loaded.'),
   ].filter(Boolean);
   const revenue = invoices
     .filter(invoice => invoice.status === 'paid')
     .reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
+  const salesTrend = getSalesTrendData(sales);
 
   document.getElementById('content').innerHTML = `
     <div class="welcome">
@@ -405,6 +409,7 @@ async function renderOverview() {
         </div>
       </div>
       ${renderSalesOverviewSection(salesAnalytics)}
+      ${renderSalesTrendSection(salesTrend)}
       ${renderRecentMetrics(metrics)}
     </div>
   `;
@@ -443,6 +448,69 @@ function renderSalesOverviewSection(analytics) {
           <h4>Top Sale Time</h4>
           <p>${escapeHtml(analytics.highest_sale_time || '-')}</p>
         </div>
+      </div>
+    </div>
+  `;
+}
+
+function getSalesTrendData(sales) {
+  const dateMap = {};
+  const now = new Date();
+
+  for (let i = 6; i >= 0; i -= 1) {
+    const date = new Date(now);
+    date.setDate(now.getDate() - i);
+    const key = date.toISOString().slice(0, 10);
+    dateMap[key] = 0;
+  }
+
+  sales.forEach((sale) => {
+    const dateKey = (sale.sale_date || sale.sale_time || '').slice(0, 10);
+    if (dateKey && Object.prototype.hasOwnProperty.call(dateMap, dateKey)) {
+      dateMap[dateKey] += Number(sale.total_amount || 0);
+    }
+  });
+
+  return Object.keys(dateMap).map(date => ({
+    date,
+    value: dateMap[date],
+  }));
+}
+
+function renderSalesTrendSection(trend) {
+  if (!Array.isArray(trend) || trend.length === 0) {
+    return '';
+  }
+
+  const maxValue = Math.max(...trend.map(point => point.value), 1);
+  const total = trend.reduce((sum, point) => sum + point.value, 0);
+  const latest = trend[trend.length - 1]?.value || 0;
+  const previous = trend[trend.length - 2]?.value || 0;
+  const trendDirection = latest >= previous ? 'up' : 'down';
+  const change = previous === 0 ? latest : ((latest - previous) / Math.max(previous, 1)) * 100;
+
+  return `
+    <div class="subsection sales-trend">
+      <div class="sales-trend-header">
+        <div>
+          <h3>Sales Trend</h3>
+          <p>Recent daily sales performance.</p>
+        </div>
+        <div class="sales-trend-summary ${trendDirection}">
+          <span>${trendDirection === 'up' ? '▲' : '▼'}</span>
+          <strong>${change.toFixed(1)}%</strong>
+          <small>vs yesterday</small>
+        </div>
+      </div>
+      <div class="sparkline" role="img" aria-label="Sales trend sparkline">
+        ${trend.map(point => `
+          <div class="sparkline-bar" style="height: ${Math.max(10, (point.value / maxValue) * 100)}%" title="${point.date}: ${formatMoney(point.value)}"></div>
+        `).join('')}
+      </div>
+      <div class="sparkline-legend">
+        ${trend.map(point => `
+          <span>${point.date.slice(5)}</span>
+        `).join('')}
       </div>
     </div>
   `;
