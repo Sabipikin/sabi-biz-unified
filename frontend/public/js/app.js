@@ -95,11 +95,26 @@ const API = {
   },
 
   business: {
+    customers: () => API.request('/api/business/customers'),
+    createCustomer: (data) => API.request('/api/business/customers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
     invoices: () => API.request('/api/business/invoices'),
+    invoice: (id) => API.request(`/api/business/invoices/${id}`),
     createInvoice: (data) => API.request('/api/business/invoices', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+    updateInvoice: (id, data) => API.request(`/api/business/invoices/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+    sendInvoice: (id, data) => API.request(`/api/business/invoices/${id}/send`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    invoiceAnalytics: () => API.request('/api/business/invoices/analytics'),
     inventory: () => API.request('/api/business/inventory'),
     createInventoryItem: (data) => API.request('/api/business/inventory', {
       method: 'POST',
@@ -364,11 +379,12 @@ async function navigateDashboard(route) {
 }
 
 async function renderOverview() {
-  const [invoicesRes, inventoryRes, salesRes, salesAnalyticsRes] = await Promise.all([
+  const [invoicesRes, inventoryRes, salesRes, salesAnalyticsRes, invoiceAnalyticsRes] = await Promise.all([
     API.business.invoices(),
     API.business.inventory(),
     API.business.sales(),
     API.business.salesAnalytics(),
+    API.business.invoiceAnalytics(),
   ]);
   const analyticsRes = await API.analytics.metrics();
 
@@ -376,6 +392,7 @@ async function renderOverview() {
   const inventory = getResponseData(inventoryRes);
   const sales = getResponseData(salesRes);
   const salesAnalytics = getResponseData(salesAnalyticsRes, {});
+  const invoiceAnalytics = getResponseData(invoiceAnalyticsRes, {});
   const metrics = getResponseData(analyticsRes);
   const errors = [
     getResponseError(invoicesRes, 'Invoices could not be loaded.'),
@@ -409,6 +426,7 @@ async function renderOverview() {
         </div>
       </div>
       ${renderSalesOverviewSection(salesAnalytics)}
+      ${renderInvoiceAnalyticsSection(invoiceAnalytics)}
       ${renderSalesTrendSection(salesTrend)}
       ${renderRecentMetrics(metrics)}
     </div>
@@ -549,19 +567,48 @@ function renderRecentMetrics(metrics) {
 }
 
 async function renderInvoices() {
-  const response = await API.business.invoices();
-  const invoices = getResponseData(response);
-  const error = getResponseError(response, 'Invoices could not be loaded.');
+  const [invoicesRes, inventoryRes, customersRes, analyticsRes] = await Promise.all([
+    API.business.invoices(),
+    API.business.inventory(),
+    API.business.customers(),
+    API.business.invoiceAnalytics(),
+  ]);
+
+  const invoices = getResponseData(invoicesRes);
+  const inventory = getResponseData(inventoryRes);
+  const customers = getResponseData(customersRes);
+  const analytics = getResponseData(analyticsRes, {});
+
+  const errors = [
+    getResponseError(invoicesRes, 'Invoices could not be loaded.'),
+    getResponseError(inventoryRes, 'Inventory could not be loaded.'),
+    getResponseError(customersRes, 'Customers could not be loaded.'),
+    getResponseError(analyticsRes, 'Invoice analytics could not be loaded.'),
+  ].filter(Boolean);
 
   document.getElementById('content').innerHTML = `
     <div class="panel">
       <div class="panel-header">
         <div>
           <h2>Invoices</h2>
-          <p>Create and track customer invoices.</p>
+          <p>Create, edit, and send invoices to customers.</p>
         </div>
       </div>
-      <form id="invoiceForm" class="form-grid">
+      ${errors.length ? renderSectionError(errors.join(' ')) : ''}
+      ${renderInvoiceAnalyticsSection(analytics)}
+      <form id="invoiceForm" class="form-grid invoice-form">
+        <input type="hidden" id="invoiceCustomerId" name="customer_id">
+        <div class="form-group">
+          <label for="invoiceCustomerSelect">Select Customer</label>
+          <select id="invoiceCustomerSelect" class="form-control">
+            <option value="">New customer</option>
+            ${customers.map(customer => `
+              <option value="${customer.id}" data-phone="${escapeHtml(customer.phone || '')}">
+                ${escapeHtml(customer.name)}${customer.phone ? ` — ${escapeHtml(customer.phone)}` : ''}
+              </option>
+            `).join('')}
+          </select>
+        </div>
         <div class="form-group">
           <label for="invoiceCustomer">Customer Name</label>
           <input id="invoiceCustomer" name="customer_name" required>
@@ -571,7 +618,7 @@ async function renderInvoices() {
           <input id="invoicePhone" name="customer_phone" type="tel">
         </div>
         <div class="form-group">
-          <label for="invoiceAmount">Amount</label>
+          <label for="invoiceAmount">Invoice Total</label>
           <input id="invoiceAmount" name="amount" type="number" min="0" step="0.01" required>
         </div>
         <div class="form-group">
@@ -586,29 +633,228 @@ async function renderInvoices() {
             <option value="paid">Paid</option>
           </select>
         </div>
+        <div class="form-group checkbox-group">
+          <label>
+            <input id="invoiceAutoMail" name="auto_mail" type="checkbox">
+            Auto mail invoice
+          </label>
+        </div>
+        <div class="form-group checkbox-group">
+          <label>
+            <input id="invoiceAutoWhatsapp" name="auto_whatsapp" type="checkbox">
+            Auto send via WhatsApp
+          </label>
+        </div>
         <div class="form-group form-span">
           <label for="invoiceDescription">Description</label>
           <textarea id="invoiceDescription" name="description" rows="3"></textarea>
         </div>
-        <button type="submit" class="btn-primary form-action">Create Invoice</button>
+
+        <div class="form-span invoice-items-panel">
+          <div class="invoice-items-toolbar">
+            <h3>Invoice Products</h3>
+            <button type="button" id="addInvoiceItem" class="btn-secondary">Add Product</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table invoice-items-table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Unit</th>
+                  <th>Qty</th>
+                  <th>Unit Price</th>
+                  <th>Cost Price</th>
+                  <th>Total</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="invoiceItemsContainer">
+                ${createInvoiceItemRow(0, inventory)}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary form-action" id="invoiceSubmitButton">Create Invoice</button>
       </form>
-      ${error ? renderSectionError(error) : ''}
       ${renderInvoiceTable(invoices)}
     </div>
   `;
 
-  document.getElementById('invoiceForm').addEventListener('submit', async (event) => {
+  const invoiceCustomerSelect = document.getElementById('invoiceCustomerSelect');
+  const invoiceCustomer = document.getElementById('invoiceCustomer');
+  const invoicePhone = document.getElementById('invoicePhone');
+  const invoiceAmount = document.getElementById('invoiceAmount');
+  const invoiceItemsContainer = document.getElementById('invoiceItemsContainer');
+  const invoiceForm = document.getElementById('invoiceForm');
+  const invoiceSubmitButton = document.getElementById('invoiceSubmitButton');
+  let editingInvoiceId = null;
+
+  const setTotalAmount = () => {
+    const items = Array.from(invoiceItemsContainer.querySelectorAll('.invoice-item-row'));
+    const total = items.reduce((sum, row) => {
+      const value = Number(row.querySelector('[name="total_price"]').value || 0);
+      return sum + value;
+    }, 0);
+    invoiceAmount.value = total.toFixed(2);
+  };
+
+  const syncRowTotal = (row) => {
+    const quantity = Number(row.querySelector('[name="quantity"]').value || 0);
+    const unitPrice = Number(row.querySelector('[name="unit_price"]').value || 0);
+    row.querySelector('[name="total_price"]').value = (quantity * unitPrice).toFixed(2);
+    setTotalAmount();
+  };
+
+  const refreshInvoiceTotals = () => {
+    Array.from(invoiceItemsContainer.querySelectorAll('.invoice-item-row')).forEach(syncRowTotal);
+    setTotalAmount();
+  };
+
+  invoiceCustomerSelect.addEventListener('change', () => {
+    const selected = invoiceCustomerSelect.selectedOptions[0];
+    if (!selected || !selected.value) {
+      document.getElementById('invoiceCustomerId').value = '';
+      invoiceCustomer.value = '';
+      invoicePhone.value = '';
+      return;
+    }
+    document.getElementById('invoiceCustomerId').value = selected.value;
+    invoiceCustomer.value = selected.textContent.split(' — ')[0].trim();
+    invoicePhone.value = selected.dataset.phone || '';
+  });
+
+  document.getElementById('addInvoiceItem').addEventListener('click', () => {
+    const rowCount = invoiceItemsContainer.querySelectorAll('.invoice-item-row').length;
+    invoiceItemsContainer.insertAdjacentHTML('beforeend', createInvoiceItemRow(rowCount, inventory));
+  });
+
+  invoiceItemsContainer.addEventListener('input', (event) => {
+    const row = event.target.closest('.invoice-item-row');
+    if (!row) return;
+    if (event.target.matches('[name="inventory_id"]')) {
+      const selected = event.target.selectedOptions[0];
+      if (selected) {
+        row.querySelector('[name="product_name"]').value = selected.dataset.name || row.querySelector('[name="product_name"]').value;
+        row.querySelector('[name="unit_price"]').value = selected.dataset.unitPrice || '0';
+        row.querySelector('[name="cost_price"]').value = selected.dataset.costPrice || '0';
+      }
+    }
+    if (event.target.matches('[name="quantity"], [name="unit_price"]')) {
+      syncRowTotal(row);
+    }
+  });
+
+  invoiceItemsContainer.addEventListener('click', (event) => {
+    const removeButton = event.target.closest('.remove-invoice-item');
+    if (!removeButton) return;
     event.preventDefault();
-    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
-    setButtonLoading(submitButton, true, 'Creating...');
-    const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
-    const result = await API.business.createInvoice(formData);
+    const row = removeButton.closest('.invoice-item-row');
+    row?.remove();
+    refreshInvoiceTotals();
+  });
+
+  const populateInvoiceForm = (invoice) => {
+    editingInvoiceId = invoice.id;
+    document.getElementById('invoiceCustomerId').value = invoice.customer_id || '';
+    invoiceCustomerSelect.value = invoice.customer_id || '';
+    invoiceCustomer.value = invoice.customer_name || '';
+    invoicePhone.value = invoice.customer_phone || '';
+    invoiceAmount.value = invoice.amount || 0;
+    document.getElementById('invoiceDueDate').value = invoice.due_date || '';
+    document.getElementById('invoiceStatus').value = invoice.status || 'draft';
+    document.getElementById('invoiceDescription').value = invoice.description || '';
+    document.getElementById('invoiceAutoMail').checked = !!invoice.auto_mail;
+    document.getElementById('invoiceAutoWhatsapp').checked = !!invoice.auto_whatsapp;
+    invoiceItemsContainer.innerHTML = invoice.items.map((item, index) => createInvoiceItemRow(index, inventory, item)).join('');
+    refreshInvoiceTotals();
+    invoiceSubmitButton.textContent = 'Update Invoice';
+  };
+
+  const clearInvoiceForm = () => {
+    editingInvoiceId = null;
+    document.getElementById('invoiceCustomerId').value = '';
+    invoiceCustomerSelect.value = '';
+    invoiceCustomer.value = '';
+    invoicePhone.value = '';
+    invoiceAmount.value = '0.00';
+    document.getElementById('invoiceDueDate').value = '';
+    document.getElementById('invoiceStatus').value = 'draft';
+    document.getElementById('invoiceDescription').value = '';
+    document.getElementById('invoiceAutoMail').checked = false;
+    document.getElementById('invoiceAutoWhatsapp').checked = false;
+    invoiceItemsContainer.innerHTML = createInvoiceItemRow(0, inventory);
+    invoiceSubmitButton.textContent = 'Create Invoice';
+  };
+
+  invoiceForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setButtonLoading(invoiceSubmitButton, true, editingInvoiceId ? 'Updating...' : 'Saving...');
+    const rawData = Object.fromEntries(new FormData(invoiceForm).entries());
+    const items = Array.from(invoiceItemsContainer.querySelectorAll('.invoice-item-row')).map(row => ({
+      inventory_id: row.querySelector('[name="inventory_id"]').value || null,
+      product_name: row.querySelector('[name="product_name"]').value.trim(),
+      unit: row.querySelector('[name="unit"]').value.trim(),
+      quantity: Number(row.querySelector('[name="quantity"]').value || 0),
+      unit_price: Number(row.querySelector('[name="unit_price"]').value || 0),
+      cost_price: Number(row.querySelector('[name="cost_price"]').value || 0),
+      total_price: Number(row.querySelector('[name="total_price"]').value || 0),
+    })).filter(item => item.product_name && item.quantity > 0);
+
+    const data = {
+      customer_id: rawData.customer_id || null,
+      customer_name: rawData.customer_name,
+      customer_phone: rawData.customer_phone,
+      amount: Number(rawData.amount || 0),
+      due_date: rawData.due_date || null,
+      status: rawData.status || 'draft',
+      description: rawData.description || null,
+      auto_mail: document.getElementById('invoiceAutoMail').checked,
+      auto_whatsapp: document.getElementById('invoiceAutoWhatsapp').checked,
+      invoice_items: items,
+    };
+
+    const result = editingInvoiceId
+      ? await API.business.updateInvoice(editingInvoiceId, data)
+      : await API.business.createInvoice(data);
+
     if (result?.success) {
-      notify('Invoice created.');
+      notify(editingInvoiceId ? 'Invoice updated.' : 'Invoice created.');
+      clearInvoiceForm();
       await renderInvoices();
     } else {
-      notify(result?.message || 'Unable to create invoice.', 'error');
-      setButtonLoading(submitButton, false);
+      notify(result?.message || 'Unable to save invoice.', 'error');
+      setButtonLoading(invoiceSubmitButton, false);
+    }
+  });
+
+  document.getElementById('invoiceListTable')?.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+
+    const invoiceId = button.dataset.invoiceId;
+    if (!invoiceId) return;
+
+    if (button.dataset.action === 'edit') {
+      const response = await API.business.invoice(invoiceId);
+      const invoice = getResponseData(response, null);
+      if (invoice) {
+        populateInvoiceForm(invoice);
+      } else {
+        notify(response?.message || 'Unable to load invoice.', 'error');
+      }
+      return;
+    }
+
+    if (button.dataset.action === 'whatsapp' || button.dataset.action === 'email') {
+      const method = button.dataset.action === 'whatsapp' ? 'whatsapp' : 'email';
+      const sendResponse = await API.business.sendInvoice(invoiceId, { method });
+      if (sendResponse?.success) {
+        notify(`Invoice sent via ${method}.`);
+      } else {
+        notify(sendResponse?.message || `Unable to send invoice via ${method}.`, 'error');
+      }
+      return;
     }
   });
 }
@@ -620,14 +866,16 @@ function renderInvoiceTable(invoices) {
 
   return `
     <div class="table-wrap">
-      <table class="data-table">
+      <table class="data-table" id="invoiceListTable">
         <thead>
           <tr>
             <th>Customer</th>
             <th>Amount</th>
             <th>Status</th>
+            <th>Items</th>
             <th>Due</th>
             <th>Created</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -636,13 +884,78 @@ function renderInvoiceTable(invoices) {
               <td>${escapeHtml(invoice.customer_name || '-')}</td>
               <td>${formatMoney(invoice.amount)}</td>
               <td><span class="status ${escapeHtml(invoice.status || 'draft')}">${escapeHtml(invoice.status || 'draft')}</span></td>
+              <td>${Number(invoice.item_count || 0)}</td>
               <td>${formatDate(invoice.due_date)}</td>
               <td>${formatDate(invoice.created_at)}</td>
+              <td>
+                <button class="btn-link" data-action="edit" data-invoice-id="${invoice.id}">Edit</button>
+                <button class="btn-link" data-action="whatsapp" data-invoice-id="${invoice.id}">WhatsApp</button>
+                <button class="btn-link" data-action="email" data-invoice-id="${invoice.id}">Email</button>
+              </td>
             </tr>
           `).join('')}
         </tbody>
       </table>
     </div>
+  `;
+}
+
+function renderInvoiceAnalyticsSection(analytics) {
+  return `
+    <div class="overview-grid">
+      <div class="overview-card">
+        <h4>Total Invoices</h4>
+        <p>${analytics.total_invoices ?? 0}</p>
+      </div>
+      <div class="overview-card">
+        <h4>Paid</h4>
+        <p>${analytics.paid_invoices ?? 0}</p>
+      </div>
+      <div class="overview-card">
+        <h4>Pending</h4>
+        <p>${formatMoney(analytics.pending_amount)}</p>
+      </div>
+      <div class="overview-card">
+        <h4>Overdue</h4>
+        <p>${formatMoney(analytics.overdue_amount)}</p>
+      </div>
+      <div class="overview-card">
+        <h4>Items Sold</h4>
+        <p>${analytics.total_items_sold ?? 0}</p>
+      </div>
+      <div class="overview-card">
+        <h4>Top Product</h4>
+        <p>${escapeHtml(analytics.top_product || '-')}</p>
+      </div>
+    </div>
+  `;
+}
+
+function createInvoiceItemRow(index, inventory, item = {}) {
+  return `
+    <tr class="invoice-item-row" data-row="${index}">
+      <td>
+        <select name="inventory_id" class="invoice-product-select">
+          <option value="">Select product</option>
+          ${inventory.map(product => `
+            <option value="${product.id}"
+              data-name="${escapeHtml(product.product_name)}"
+              data-unit-price="${product.unit_price || 0}"
+              data-cost-price="${product.cost_price || 0}"
+              ${item.inventory_id === product.id ? 'selected' : ''}>
+              ${escapeHtml(product.product_name)}
+            </option>
+          `).join('')}
+        </select>
+        <input type="text" name="product_name" value="${escapeHtml(item.product_name || '')}" placeholder="Product name">
+      </td>
+      <td><input name="unit" type="text" value="${escapeHtml(item.unit || '')}" placeholder="pcs"></td>
+      <td><input name="quantity" type="number" min="1" value="${Number(item.quantity || 1)}"></td>
+      <td><input name="unit_price" type="number" min="0" step="0.01" value="${Number(item.unit_price || 0).toFixed(2)}"></td>
+      <td><input name="cost_price" type="number" min="0" step="0.01" value="${Number(item.cost_price || 0).toFixed(2)}"></td>
+      <td><input name="total_price" type="number" min="0" step="0.01" value="${Number(item.total_price || (Number(item.quantity || 1) * Number(item.unit_price || 0))).toFixed(2)}" readonly></td>
+      <td><button type="button" class="btn-link remove-invoice-item">Remove</button></td>
+    </tr>
   `;
 }
 
