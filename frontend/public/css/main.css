@@ -424,6 +424,41 @@ html, body {
   color: var(--text);
 }
 
+.overview-card.milestone-card {
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.milestone-event-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+}
+
+.button-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.button-row .btn,
+.button-row .btn-primary,
+.button-row .btn.secondary,
+.button-row .btn-link {
+  flex: 1 1 auto;
+  min-width: 140px;
+}
+
+.wide-select {
+  width: 100%;
+}
+
+.milestone-preview textarea {
+  min-height: 180px;
+}
+
 .event-list {
   margin: 0;
   padding: 0;
@@ -1549,17 +1584,23 @@ html, body {
   }
 
   .navbar-menu.active {
-    max-height: 500px;
+    max-height: 999px;
+  }
+
+  .navbar {
+    position: sticky;
+    top: 0;
+    z-index: 1001;
   }
 
   .nav-item {
-    padding: 10px 12px;
-    font-size: 13px;
-    gap: 10px;
+    padding: 12px 14px;
+    font-size: 14px;
+    gap: 12px;
   }
 
   .nav-item .nav-icon {
-    font-size: 16px;
+    font-size: 18px;
   }
 
   .main-content {
@@ -1572,6 +1613,11 @@ html, body {
   }
 
   .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-overview-grid,
+  .customer-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1614,6 +1660,10 @@ html, body {
   }
 
   .form-row.checkbox-row {
+    grid-template-columns: 1fr;
+  }
+
+  .milestone-event-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1769,6 +1819,14 @@ html, body {
   .item-grid .item-form-group:nth-child(3),
   .item-grid .item-form-group:nth-child(4) {
     grid-column: 1;
+  }
+
+  .button-row {
+    flex-direction: column;
+  }
+
+  .milestone-card h4 {
+    font-size: 16px;
   }
 
   .item-form-group label {
