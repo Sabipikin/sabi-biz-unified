@@ -322,17 +322,46 @@ function renderDashboardShell() {
     <div class="dashboard">
       <nav class="navbar">
         <div class="navbar-brand">
+          <button type="button" id="navToggle" class="nav-toggle" aria-label="Toggle menu">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
           <h1>SabiBiz</h1>
         </div>
-        <div class="navbar-menu">
-          <a href="#/dashboard" data-route="dashboard">Dashboard</a>
-          <a href="#/invoices" data-route="invoices">Invoices</a>
-          <a href="#/inventory" data-route="inventory">Inventory</a>
-          <a href="#/sales" data-route="sales">Sales</a>
-          <a href="#/whatsapp" data-route="whatsapp">WhatsApp</a>
-          <a href="#/subscriptions" data-route="subscriptions">Subscriptions</a>
-          <a href="#/settings" data-route="settings">Settings</a>
-          <button type="button" id="logoutButton">Logout</button>
+        <div class="navbar-menu" id="navbarMenu">
+          <a href="#/dashboard" data-route="dashboard" class="nav-item">
+            <span class="nav-icon">📊</span>
+            <span>Dashboard</span>
+          </a>
+          <a href="#/invoices" data-route="invoices" class="nav-item">
+            <span class="nav-icon">📄</span>
+            <span>Invoices</span>
+          </a>
+          <a href="#/inventory" data-route="inventory" class="nav-item">
+            <span class="nav-icon">📦</span>
+            <span>Inventory</span>
+          </a>
+          <a href="#/sales" data-route="sales" class="nav-item">
+            <span class="nav-icon">💰</span>
+            <span>Sales</span>
+          </a>
+          <a href="#/whatsapp" data-route="whatsapp" class="nav-item">
+            <span class="nav-icon">💬</span>
+            <span>WhatsApp</span>
+          </a>
+          <a href="#/subscriptions" data-route="subscriptions" class="nav-item">
+            <span class="nav-icon">🎁</span>
+            <span>Subscriptions</span>
+          </a>
+          <a href="#/settings" data-route="settings" class="nav-item">
+            <span class="nav-icon">⚙️</span>
+            <span>Settings</span>
+          </a>
+          <button type="button" id="logoutButton" class="nav-item logout-btn">
+            <span class="nav-icon">🚪</span>
+            <span>Logout</span>
+          </button>
         </div>
       </nav>
 
@@ -343,11 +372,26 @@ function renderDashboardShell() {
     </div>
   `;
 
+  const navToggle = document.getElementById('navToggle');
+  const navbarMenu = document.getElementById('navbarMenu');
+  
+  navToggle?.addEventListener('click', () => {
+    navbarMenu?.classList.toggle('active');
+    navToggle.classList.toggle('active');
+  });
+
+  navbarMenu?.addEventListener('click', (e) => {
+    if (e.target.closest('a') && !e.target.closest('.nav-toggle')) {
+      navbarMenu.classList.remove('active');
+      navToggle?.classList.remove('active');
+    }
+  });
+
   document.getElementById('logoutButton').addEventListener('click', logout);
 }
 
 function setActiveRoute(route) {
-  document.querySelectorAll('.navbar-menu a').forEach(link => {
+  document.querySelectorAll('.nav-item').forEach(link => {
     link.classList.toggle('active', link.dataset.route === route);
   });
 }
@@ -596,86 +640,113 @@ async function renderInvoices() {
       </div>
       ${errors.length ? renderSectionError(errors.join(' ')) : ''}
       ${renderInvoiceAnalyticsSection(analytics)}
-      <form id="invoiceForm" class="form-grid invoice-form">
+      
+      <form id="invoiceForm" class="invoice-form">
         <input type="hidden" id="invoiceCustomerId" name="customer_id">
-        <div class="form-group">
-          <label for="invoiceCustomerSelect">Select Customer</label>
-          <select id="invoiceCustomerSelect" class="form-control">
-            <option value="">New customer</option>
-            ${customers.map(customer => `
-              <option value="${customer.id}" data-phone="${escapeHtml(customer.phone || '')}">
-                ${escapeHtml(customer.name)}${customer.phone ? ` — ${escapeHtml(customer.phone)}` : ''}
-              </option>
-            `).join('')}
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="invoiceCustomer">Customer Name</label>
-          <input id="invoiceCustomer" name="customer_name" required>
-        </div>
-        <div class="form-group">
-          <label for="invoicePhone">Customer Phone</label>
-          <input id="invoicePhone" name="customer_phone" type="tel">
-        </div>
-        <div class="form-group">
-          <label for="invoiceAmount">Invoice Total</label>
-          <input id="invoiceAmount" name="amount" type="number" min="0" step="0.01" required>
-        </div>
-        <div class="form-group">
-          <label for="invoiceDueDate">Due Date</label>
-          <input id="invoiceDueDate" name="due_date" type="date">
-        </div>
-        <div class="form-group">
-          <label for="invoiceStatus">Status</label>
-          <select id="invoiceStatus" name="status">
-            <option value="draft">Draft</option>
-            <option value="sent">Sent</option>
-            <option value="paid">Paid</option>
-          </select>
-        </div>
-        <div class="form-group checkbox-group">
-          <label>
-            <input id="invoiceAutoMail" name="auto_mail" type="checkbox">
-            Auto mail invoice
-          </label>
-        </div>
-        <div class="form-group checkbox-group">
-          <label>
-            <input id="invoiceAutoWhatsapp" name="auto_whatsapp" type="checkbox">
-            Auto send via WhatsApp
-          </label>
-        </div>
-        <div class="form-group form-span">
-          <label for="invoiceDescription">Description</label>
-          <textarea id="invoiceDescription" name="description" rows="3"></textarea>
-        </div>
-
-        <div class="form-span invoice-items-panel">
-          <div class="invoice-items-toolbar">
-            <h3>Invoice Products</h3>
-            <button type="button" id="addInvoiceItem" class="btn-secondary">Add Product</button>
+        
+        <!-- CUSTOMER SECTION -->
+        <div class="invoice-section">
+          <div class="section-header">
+            <h3>Customer Information</h3>
           </div>
-          <div class="table-wrap">
-            <table class="data-table invoice-items-table">
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Unit</th>
-                  <th>Qty</th>
-                  <th>Unit Price</th>
-                  <th>Cost Price</th>
-                  <th>Total</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="invoiceItemsContainer">
-                ${createInvoiceItemRow(0, inventory)}
-              </tbody>
-            </table>
+          <div class="section-content">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="invoiceCustomerSelect">Select Existing Customer</label>
+                <select id="invoiceCustomerSelect" class="form-control">
+                  <option value="">+ New Customer</option>
+                  ${customers.map(customer => `
+                    <option value="${customer.id}" data-phone="${escapeHtml(customer.phone || '')}">
+                      ${escapeHtml(customer.name)}${customer.phone ? ` — ${escapeHtml(customer.phone)}` : ''}
+                    </option>
+                  `).join('')}
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="invoiceCustomer">Customer Name *</label>
+                <input id="invoiceCustomer" name="customer_name" placeholder="Full name" required>
+              </div>
+              <div class="form-group">
+                <label for="invoicePhone">Phone Number</label>
+                <input id="invoicePhone" name="customer_phone" type="tel" placeholder="+234...">
+              </div>
+            </div>
           </div>
         </div>
 
-        <button type="submit" class="btn-primary form-action" id="invoiceSubmitButton">Create Invoice</button>
+        <!-- INVOICE DETAILS SECTION -->
+        <div class="invoice-section">
+          <div class="section-header">
+            <h3>Invoice Details</h3>
+          </div>
+          <div class="section-content">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="invoiceDueDate">Due Date</label>
+                <input id="invoiceDueDate" name="due_date" type="date">
+              </div>
+              <div class="form-group">
+                <label for="invoiceStatus">Status</label>
+                <select id="invoiceStatus" name="status">
+                  <option value="draft">Draft</option>
+                  <option value="sent">Sent</option>
+                  <option value="paid">Paid</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="invoiceDescription">Description / Notes</label>
+                <textarea id="invoiceDescription" name="description" placeholder="Add any notes..." rows="3"></textarea>
+              </div>
+            </div>
+            <div class="form-row checkbox-row">
+              <div class="form-group checkbox-group">
+                <label>
+                  <input id="invoiceAutoMail" name="auto_mail" type="checkbox">
+                  <span>Auto send via Email</span>
+                </label>
+              </div>
+              <div class="form-group checkbox-group">
+                <label>
+                  <input id="invoiceAutoWhatsapp" name="auto_whatsapp" type="checkbox">
+                  <span>Auto send via WhatsApp</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PRODUCTS SECTION -->
+        <div class="invoice-section">
+          <div class="section-header">
+            <h3>Products & Services</h3>
+            <button type="button" id="addInvoiceItem" class="btn-secondary btn-sm">+ Add Item</button>
+          </div>
+          <div class="section-content">
+            <div id="invoiceItemsContainer" class="invoice-items-list">
+              ${createInvoiceItemRow(0, inventory)}
+            </div>
+          </div>
+        </div>
+
+        <!-- INVOICE TOTAL SECTION -->
+        <div class="invoice-section total-section">
+          <div class="total-display">
+            <div class="total-label">Invoice Total</div>
+            <div class="total-amount">
+              <span id="invoiceTotalDisplay">NGN 0.00</span>
+              <input id="invoiceAmount" name="amount" type="hidden" value="0">
+            </div>
+          </div>
+        </div>
+
+        <!-- SUBMIT BUTTON -->
+        <div class="invoice-section">
+          <button type="submit" class="btn-primary btn-lg form-action" id="invoiceSubmitButton">Create Invoice</button>
+        </div>
       </form>
       ${renderInvoiceTable(invoices)}
     </div>
@@ -697,6 +768,10 @@ async function renderInvoices() {
       return sum + value;
     }, 0);
     invoiceAmount.value = total.toFixed(2);
+    const totalDisplay = document.getElementById('invoiceTotalDisplay');
+    if (totalDisplay) {
+      totalDisplay.textContent = `NGN ${total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+    }
   };
 
   const syncRowTotal = (row) => {
@@ -828,7 +903,7 @@ async function renderInvoices() {
     }
   });
 
-  document.getElementById('invoiceListTable')?.addEventListener('click', async (event) => {
+  document.getElementById('content')?.addEventListener('click', async (event) => {
     const button = event.target.closest('button[data-action]');
     if (!button) return;
 
@@ -840,6 +915,7 @@ async function renderInvoices() {
       const invoice = getResponseData(response, null);
       if (invoice) {
         populateInvoiceForm(invoice);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
         notify(response?.message || 'Unable to load invoice.', 'error');
       }
@@ -861,41 +937,46 @@ async function renderInvoices() {
 
 function renderInvoiceTable(invoices) {
   if (!invoices.length) {
-    return '<div class="empty-state">No invoices yet.</div>';
+    return '<div class="empty-state">No invoices yet. Create your first invoice above!</div>';
   }
 
   return `
-    <div class="table-wrap">
-      <table class="data-table" id="invoiceListTable">
-        <thead>
-          <tr>
-            <th>Customer</th>
-            <th>Amount</th>
-            <th>Status</th>
-            <th>Items</th>
-            <th>Due</th>
-            <th>Created</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${invoices.map(invoice => `
-            <tr>
-              <td>${escapeHtml(invoice.customer_name || '-')}</td>
-              <td>${formatMoney(invoice.amount)}</td>
-              <td><span class="status ${escapeHtml(invoice.status || 'draft')}">${escapeHtml(invoice.status || 'draft')}</span></td>
-              <td>${Number(invoice.item_count || 0)}</td>
-              <td>${formatDate(invoice.due_date)}</td>
-              <td>${formatDate(invoice.created_at)}</td>
-              <td>
-                <button class="btn-link" data-action="edit" data-invoice-id="${invoice.id}">Edit</button>
-                <button class="btn-link" data-action="whatsapp" data-invoice-id="${invoice.id}">WhatsApp</button>
-                <button class="btn-link" data-action="email" data-invoice-id="${invoice.id}">Email</button>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+    <div class="invoices-section">
+      <div class="section-header">
+        <h3>Recent Invoices</h3>
+      </div>
+      <div class="invoices-list">
+        ${invoices.map(invoice => `
+          <div class="invoice-card">
+            <div class="invoice-card-header">
+              <div class="invoice-info">
+                <h4>${escapeHtml(invoice.customer_name || '-')}</h4>
+                <p class="invoice-id">Invoice #${invoice.id}</p>
+              </div>
+              <span class="status ${escapeHtml(invoice.status || 'draft')}">${escapeHtml(invoice.status || 'draft')}</span>
+            </div>
+            <div class="invoice-card-body">
+              <div class="invoice-detail">
+                <span class="label">Amount</span>
+                <span class="value">${formatMoney(invoice.amount)}</span>
+              </div>
+              <div class="invoice-detail">
+                <span class="label">Items</span>
+                <span class="value">${Number(invoice.item_count || 0)}</span>
+              </div>
+              <div class="invoice-detail">
+                <span class="label">Due</span>
+                <span class="value">${formatDate(invoice.due_date) || '-'}</span>
+              </div>
+            </div>
+            <div class="invoice-card-actions">
+              <button class="btn-link" data-action="edit" data-invoice-id="${invoice.id}">Edit</button>
+              <button class="btn-link" data-action="whatsapp" data-invoice-id="${invoice.id}">WhatsApp</button>
+              <button class="btn-link" data-action="email" data-invoice-id="${invoice.id}">Email</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
     </div>
   `;
 }
@@ -933,29 +1014,60 @@ function renderInvoiceAnalyticsSection(analytics) {
 
 function createInvoiceItemRow(index, inventory, item = {}) {
   return `
-    <tr class="invoice-item-row" data-row="${index}">
-      <td>
-        <select name="inventory_id" class="invoice-product-select">
-          <option value="">Select product</option>
-          ${inventory.map(product => `
-            <option value="${product.id}"
-              data-name="${escapeHtml(product.product_name)}"
-              data-unit-price="${product.unit_price || 0}"
-              data-cost-price="${product.cost_price || 0}"
-              ${item.inventory_id === product.id ? 'selected' : ''}>
-              ${escapeHtml(product.product_name)}
-            </option>
-          `).join('')}
-        </select>
-        <input type="text" name="product_name" value="${escapeHtml(item.product_name || '')}" placeholder="Product name">
-      </td>
-      <td><input name="unit" type="text" value="${escapeHtml(item.unit || '')}" placeholder="pcs"></td>
-      <td><input name="quantity" type="number" min="1" value="${Number(item.quantity || 1)}"></td>
-      <td><input name="unit_price" type="number" min="0" step="0.01" value="${Number(item.unit_price || 0).toFixed(2)}"></td>
-      <td><input name="cost_price" type="number" min="0" step="0.01" value="${Number(item.cost_price || 0).toFixed(2)}"></td>
-      <td><input name="total_price" type="number" min="0" step="0.01" value="${Number(item.total_price || (Number(item.quantity || 1) * Number(item.unit_price || 0))).toFixed(2)}" readonly></td>
-      <td><button type="button" class="btn-link remove-invoice-item">Remove</button></td>
-    </tr>
+    <div class="invoice-item-row" data-row="${index}">
+      <div class="item-card">
+        <div class="item-header">
+          <div class="item-number">#${index + 1}</div>
+          <button type="button" class="btn-remove remove-invoice-item" title="Remove item">×</button>
+        </div>
+        
+        <div class="item-form-group">
+          <label>Product / Service</label>
+          <select name="inventory_id" class="invoice-product-select form-control">
+            <option value="">Select from inventory</option>
+            ${inventory.map(product => `
+              <option value="${product.id}"
+                data-name="${escapeHtml(product.product_name)}"
+                data-unit-price="${product.unit_price || 0}"
+                data-cost-price="${product.cost_price || 0}"
+                ${item.inventory_id === product.id ? 'selected' : ''}>
+                ${escapeHtml(product.product_name)} (NGN ${Number(product.unit_price || 0).toFixed(2)})
+              </option>
+            `).join('')}
+          </select>
+          <input type="text" name="product_name" class="form-control" value="${escapeHtml(item.product_name || '')}" placeholder="Or type product name">
+        </div>
+        
+        <div class="item-grid">
+          <div class="item-form-group">
+            <label>Unit</label>
+            <input name="unit" type="text" class="form-control" value="${escapeHtml(item.unit || '')}" placeholder="e.g. pcs, kg">
+          </div>
+          
+          <div class="item-form-group">
+            <label>Quantity</label>
+            <input name="quantity" type="number" min="1" class="form-control" value="${Number(item.quantity || 1)}">
+          </div>
+          
+          <div class="item-form-group">
+            <label>Unit Price (NGN)</label>
+            <input name="unit_price" type="number" min="0" step="0.01" class="form-control" value="${Number(item.unit_price || 0).toFixed(2)}">
+          </div>
+          
+          <div class="item-form-group">
+            <label>Total (NGN)</label>
+            <input name="total_price" type="number" min="0" step="0.01" class="form-control total-price-input" value="${Number(item.total_price || (Number(item.quantity || 1) * Number(item.unit_price || 0))).toFixed(2)}" readonly>
+          </div>
+        </div>
+        
+        <div class="item-cost-info">
+          <div class="cost-field">
+            <label>Cost Price</label>
+            <input name="cost_price" type="number" min="0" step="0.01" class="form-control" value="${Number(item.cost_price || 0).toFixed(2)}" placeholder="For profit calculation">
+          </div>
+        </div>
+      </div>
+    </div>
   `;
 }
 
