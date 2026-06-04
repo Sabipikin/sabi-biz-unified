@@ -12,6 +12,26 @@ function round(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+const invoiceSchemaCache = new Set();
+async function invoiceHasColumn(column) {
+  if (invoiceSchemaCache.has(column)) {
+    return true;
+  }
+
+  const schemaResult = await query(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_name = 'invoices' AND column_name = $1
+     LIMIT 1`,
+    [column]
+  );
+
+  const hasColumn = schemaResult.rows.length > 0;
+  if (hasColumn) {
+    invoiceSchemaCache.add(column);
+  }
+  return hasColumn;
+}
+
 class BusinessService {
   async getCustomers(userId) {
     logger.debug(`Fetching customers for user ${userId}`);
@@ -179,11 +199,21 @@ class BusinessService {
 
   async getInvoiceById(userId, invoiceId) {
     logger.debug(`Fetching invoice ${invoiceId} for user ${userId}`);
+    const hasEmailColumn = await invoiceHasColumn('customer_email');
+    const hasDeliveryColumn = await invoiceHasColumn('delivery_address');
+
+    const emailSelect = hasEmailColumn
+      ? `COALESCE(c.email, i.customer_email) AS customer_email,`
+      : `c.email AS customer_email,`;
+    const deliverySelect = hasDeliveryColumn
+      ? `i.delivery_address,`
+      : `NULL AS delivery_address,`;
+
     const invoiceResult = await query(
       `SELECT i.id, i.customer_id, COALESCE(c.name, i.customer_name) AS customer_name,
               COALESCE(c.phone, i.customer_phone) AS customer_phone,
-              COALESCE(c.email, i.customer_email) AS customer_email,
-              i.delivery_address,
+              ${emailSelect}
+              ${deliverySelect}
               i.amount, i.description, i.status, i.due_date, i.paid_date,
               i.auto_mail, i.auto_whatsapp, i.sent_count, i.last_sent_method,
               i.created_at, i.updated_at
@@ -213,11 +243,21 @@ class BusinessService {
 
   async getInvoices(userId) {
     logger.debug(`Fetching invoices for user ${userId}`);
+    const hasEmailColumn = await invoiceHasColumn('customer_email');
+    const hasDeliveryColumn = await invoiceHasColumn('delivery_address');
+
+    const emailSelect = hasEmailColumn
+      ? `COALESCE(c.email, i.customer_email) AS customer_email,`
+      : `c.email AS customer_email,`;
+    const deliverySelect = hasDeliveryColumn
+      ? `i.delivery_address,`
+      : `NULL AS delivery_address,`;
+
     const result = await query(
       `SELECT i.id, i.customer_id, COALESCE(c.name, i.customer_name) AS customer_name,
               COALESCE(c.phone, i.customer_phone) AS customer_phone,
-              COALESCE(c.email, i.customer_email) AS customer_email,
-              i.delivery_address,
+              ${emailSelect}
+              ${deliverySelect}
               i.amount, i.description, i.status, i.due_date, i.paid_date,
               i.auto_mail, i.auto_whatsapp, i.sent_count, i.last_sent_method,
               i.created_at, i.updated_at,
@@ -252,30 +292,46 @@ class BusinessService {
       const customerPhone = customer?.phone || invoice.customer_phone || null;
       const customerEmail = customer?.email || invoice.customer_email || null;
       const deliveryAddress = invoice.delivery_address || null;
+      const hasInvoiceEmailColumn = await invoiceHasColumn('customer_email');
+      const hasInvoiceDeliveryColumn = await invoiceHasColumn('delivery_address');
 
-      const insertInvoice = await client.query(
-        `INSERT INTO invoices (
-           user_id, customer_id, customer_name, customer_phone, customer_email, delivery_address,
-           amount, description, status, due_date, auto_mail, auto_whatsapp, sent_count, last_sent_method,
-           created_at, updated_at
+      const columns = [
+        'user_id',
+        'customer_id',
+        'customer_name',
+        'customer_phone',
+      ];
+      const values = [
+        userId,
+        customer?.id || null,
+        customerName,
+        customerPhone,
+      ];
+      const placeholders = ['$1', '$2', '$3', '$4'];
+      let index = 4;
+
+      if (hasInvoiceEmailColumn) {
+        columns.push('customer_email');
+        values.push(customerEmail);
+        placeholders.push(`$${++index}`);
+      }
+      if (hasInvoiceDeliveryColumn) {
+        columns.push('delivery_address');
+        values.push(deliveryAddress);
+        placeholders.push(`$${++index}`);
+      }
+
+      columns.push('amount', 'description', 'status', 'due_date', 'auto_mail', 'auto_whatsapp');
+      values.push(amount, invoice.description || null, invoice.status || 'draft', invoice.due_date || null, autoMail, autoWhatsapp);
+      placeholders.push(`$${++index}`, `$${++index}`, `$${++index}`, `$${++index}`, `$${++index}`, `$${++index}`);
+
+      const insertQuery = `INSERT INTO invoices (
+           ${columns.join(', ')}, sent_count, last_sent_method, created_at, updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 0, NULL, NOW(), NOW())
-         RETURNING id`,
-        [
-          userId,
-          customer?.id || null,
-          customerName,
-          customerPhone,
-          customerEmail,
-          deliveryAddress,
-          amount,
-          invoice.description || null,
-          invoice.status || 'draft',
-          invoice.due_date || null,
-          autoMail,
-          autoWhatsapp,
-        ]
-      );
+         VALUES (${placeholders.join(', ')}, 0, NULL, NOW(), NOW())
+         RETURNING id`;
+
+      const insertInvoice = await client.query(insertQuery, values);
 
       const invoiceId = insertInvoice.rows[0].id;
 
@@ -357,6 +413,8 @@ class BusinessService {
       const customerPhone = customer?.phone || invoice.customer_phone || null;
       const customerEmail = customer?.email || invoice.customer_email || null;
       const deliveryAddress = invoice.delivery_address || null;
+      const hasInvoiceEmailColumn = await invoiceHasColumn('customer_email');
+      const hasInvoiceDeliveryColumn = await invoiceHasColumn('delivery_address');
 
       const previousItems = await client.query(
         `SELECT inventory_id, quantity FROM invoice_items WHERE invoice_id = $1`,
@@ -409,37 +467,51 @@ class BusinessService {
         }
       }
 
-      await client.query(
-        `UPDATE invoices SET
-           customer_id = $1,
-           customer_name = $2,
-           customer_phone = $3,
-           customer_email = $4,
-           delivery_address = $5,
-           amount = $6,
-           description = $7,
-           status = $8,
-           due_date = $9,
-           auto_mail = $10,
-           auto_whatsapp = $11,
-           updated_at = NOW()
-         WHERE id = $12 AND user_id = $13`,
-        [
-          customer?.id || null,
-          customerName,
-          customerPhone,
-          customerEmail,
-          deliveryAddress,
-          amount,
-          invoice.description || null,
-          invoice.status || 'draft',
-          invoice.due_date || null,
-          autoMail,
-          autoWhatsapp,
-          invoiceId,
-          userId,
-        ]
+      const updateColumns = [
+        'customer_id = $1',
+        'customer_name = $2',
+        'customer_phone = $3',
+      ];
+      const updateValues = [
+        customer?.id || null,
+        customerName,
+        customerPhone,
+      ];
+      let paramIndex = 3;
+
+      if (hasInvoiceEmailColumn) {
+        updateColumns.push(`customer_email = $${++paramIndex}`);
+        updateValues.push(customerEmail);
+      }
+      if (hasInvoiceDeliveryColumn) {
+        updateColumns.push(`delivery_address = $${++paramIndex}`);
+        updateValues.push(deliveryAddress);
+      }
+
+      updateColumns.push(
+        `amount = $${++paramIndex}`,
+        `description = $${++paramIndex}`,
+        `status = $${++paramIndex}`,
+        `due_date = $${++paramIndex}`,
+        `auto_mail = $${++paramIndex}`,
+        `auto_whatsapp = $${++paramIndex}`,
+        'updated_at = NOW()'
       );
+      updateValues.push(
+        amount,
+        invoice.description || null,
+        invoice.status || 'draft',
+        invoice.due_date || null,
+        autoMail,
+        autoWhatsapp
+      );
+
+      const updateQuery = `UPDATE invoices SET
+           ${updateColumns.join(',\n           ')}
+         WHERE id = $${++paramIndex} AND user_id = $${++paramIndex}`;
+      updateValues.push(invoiceId, userId);
+
+      await client.query(updateQuery, updateValues);
 
       await client.query('COMMIT');
       return this.getInvoiceById(userId, invoiceId);
