@@ -32,6 +32,53 @@ router.get('/customers/analytics', authMiddleware, async (req, res, next) => {
   }
 });
 
+router.get('/milestones', authMiddleware, async (req, res, next) => {
+  try {
+    const milestones = await businessService.getMilestoneMessages(req.user.userId);
+    res.json({ success: true, data: milestones });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/milestones/templates', authMiddleware, async (req, res, next) => {
+  try {
+    const templates = await businessService.getMilestoneTemplates(req.user.userId);
+    res.json({ success: true, data: templates });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/milestones/templates', authMiddleware, async (req, res, next) => {
+  try {
+    const templates = await businessService.saveMilestoneTemplates(req.user.userId, req.body);
+    res.json({ success: true, data: templates });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/milestones/generate', authMiddleware, async (req, res, next) => {
+  try {
+    const { customerId, type } = req.query;
+    const message = await businessService.generateMilestoneMessage(req.user.userId, customerId, type);
+    res.json({ success: true, data: message });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/milestones/send', authMiddleware, async (req, res, next) => {
+  try {
+    const { customerId, milestoneType, messageText } = req.body;
+    const result = await businessService.sendMilestoneMessage(req.user.userId, customerId, milestoneType, messageText);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/customers/:id', authMiddleware, async (req, res, next) => {
   try {
     const customer = await businessService.getCustomerById(req.user.userId, req.params.id);

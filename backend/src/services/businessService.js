@@ -52,6 +52,26 @@ async function customerHasColumn(column) {
   return hasColumn;
 }
 
+const userSchemaCache = new Set();
+async function userHasColumn(column) {
+  if (userSchemaCache.has(column)) {
+    return true;
+  }
+
+  const schemaResult = await query(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_name = 'users' AND column_name = $1
+     LIMIT 1`,
+    [column]
+  );
+
+  const hasColumn = schemaResult.rows.length > 0;
+  if (hasColumn) {
+    userSchemaCache.add(column);
+  }
+  return hasColumn;
+}
+
 async function buildCustomerSelectFields() {
   const baseFields = ['c.id', 'c.name', 'c.phone', 'c.email'];
   const optionalColumns = ['city', 'region', 'delivery_address', 'birthday', 'anniversary', 'auto_birthday', 'auto_anniversary'];
@@ -83,6 +103,309 @@ async function buildCustomerReturningFields() {
 
   fields.push('created_at', 'updated_at');
   return fields.join(', ');
+}
+
+function replaceTemplateVariables(template, vars = {}) {
+  return String(template || '').replace(/\{\{\s*([^\}]+)\s*\}\}/g, (_, key) => {
+    const normalizedKey = key.trim();
+    return vars[normalizedKey] != null ? String(vars[normalizedKey]) : '';
+  });
+}
+
+function getDefaultMilestoneTemplate(type) {
+  if (type === 'anniversary') {
+    return 'Happy Anniversary {{name}}! Warm wishes from {{business_name}} on this special milestone.';
+  }
+  return 'Happy Birthday {{name}}! Warm wishes from {{business_name}} on your special day.';
+}
+
+function formatMilestoneDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  const weekday = date.toLocaleDateString(undefined, { weekday: 'long' });
+  const formatted = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return `${weekday}, ${formatted}`;
+}
+
+async function getUserMilestoneTemplates(userId) {
+  const hasBirthdayTemplate = await userHasColumn('birthday_message_template');
+  const hasAnniversaryTemplate = await userHasColumn('anniversary_message_template');
+  const hasShopName = await userHasColumn('shop_name');
+
+  const birthdayDefault = getDefaultMilestoneTemplate('birthday');
+  const anniversaryDefault = getDefaultMilestoneTemplate('anniversary');
+  const businessDefault = 'Your business';
+
+  const selectColumns = [
+    hasBirthdayTemplate ? 'birthday_message_template' : '$2::text AS birthday_message_template',
+    hasAnniversaryTemplate ? 'anniversary_message_template' : '$3::text AS anniversary_message_template',
+    hasShopName ? 'shop_name' : '$4::text AS shop_name',
+  ].join(', ');
+
+  const result = await query(
+    `SELECT ${selectColumns}
+     FROM users
+     WHERE id = $1
+     LIMIT 1`,
+    [userId, birthdayDefault, anniversaryDefault, businessDefault]
+  );
+
+  const userRow = result.rows[0] || {};
+  return {
+    birthday_message_template: userRow.birthday_message_template || birthdayDefault,
+    anniversary_message_template: userRow.anniversary_message_template || anniversaryDefault,
+    business_name: userRow.shop_name || businessDefault,
+  };
+}
+
+function buildMilestoneMessage(customer, userTemplates, type, targetDate) {
+  const template = (type === 'anniversary'
+    ? userTemplates.anniversary_message_template
+    : userTemplates.birthday_message_template) || getDefaultMilestoneTemplate(type);
+
+  const nextDate = targetDate ? new Date(targetDate) : null;
+  const dateText = nextDate ? nextDate.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '';
+  const weekday = nextDate ? nextDate.toLocaleDateString(undefined, { weekday: 'long' }) : '';
+  const eventName = type === 'anniversary' ? 'anniversary' : 'birthday';
+
+  let years = '';
+  if (customer[type]) {
+    const original = new Date(customer[type]);
+    if (!Number.isNaN(original.getFullYear()) && nextDate) {
+      years = String(nextDate.getFullYear() - original.getFullYear());
+    }
+  }
+
+  return replaceTemplateVariables(template, {
+    name: customer.name || '',
+    business_name: userTemplates.business_name,
+    date: dateText,
+    weekday,
+    event: eventName,
+    age: years,
+    years,
+    city: customer.city || '',
+    phone: customer.phone || '',
+    email: customer.email || '',
+  });
+}
+
+async function buildUpcomingMilestones(userId) {
+  const hasBirthday = await customerHasColumn('birthday');
+  const hasAnniversary = await customerHasColumn('anniversary');
+
+  const upcomingBirthdays = hasBirthday ? await query(
+    `SELECT id, name, phone, email, birthday,
+            CASE
+              WHEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, EXTRACT(MONTH FROM birthday)::int, EXTRACT(DAY FROM birthday)::int) >= CURRENT_DATE
+                THEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, EXTRACT(MONTH FROM birthday)::int, EXTRACT(DAY FROM birthday)::int)
+              ELSE make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int + 1, EXTRACT(MONTH FROM birthday)::int, EXTRACT(DAY FROM birthday)::int)
+            END AS next_date
+     FROM customers
+     WHERE user_id = $1
+       AND birthday IS NOT NULL
+       AND (
+         CASE
+           WHEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, EXTRACT(MONTH FROM birthday)::int, EXTRACT(DAY FROM birthday)::int) >= CURRENT_DATE
+             THEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, EXTRACT(MONTH FROM birthday)::int, EXTRACT(DAY FROM birthday)::int)
+           ELSE make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int + 1, EXTRACT(MONTH FROM birthday)::int, EXTRACT(DAY FROM birthday)::int)
+         END
+       ) <= CURRENT_DATE + INTERVAL '30 days'
+     ORDER BY next_date ASC
+     LIMIT 10`,
+    [userId]
+  ) : { rows: [] };
+
+  const upcomingAnniversaries = hasAnniversary ? await query(
+    `SELECT id, name, phone, email, anniversary,
+            CASE
+              WHEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, EXTRACT(MONTH FROM anniversary)::int, EXTRACT(DAY FROM anniversary)::int) >= CURRENT_DATE
+                THEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, EXTRACT(MONTH FROM anniversary)::int, EXTRACT(DAY FROM anniversary)::int)
+              ELSE make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int + 1, EXTRACT(MONTH FROM anniversary)::int, EXTRACT(DAY FROM anniversary)::int)
+            END AS next_date
+     FROM customers
+     WHERE user_id = $1
+       AND anniversary IS NOT NULL
+       AND (
+         CASE
+           WHEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, EXTRACT(MONTH FROM anniversary)::int, EXTRACT(DAY FROM anniversary)::int) >= CURRENT_DATE
+             THEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, EXTRACT(MONTH FROM anniversary)::int, EXTRACT(DAY FROM anniversary)::int)
+           ELSE make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int + 1, EXTRACT(MONTH FROM anniversary)::int, EXTRACT(DAY FROM anniversary)::int)
+         END
+       ) <= CURRENT_DATE + INTERVAL '30 days'
+     ORDER BY next_date ASC
+     LIMIT 10`,
+    [userId]
+  ) : { rows: [] };
+
+  return {
+    upcoming_birthdays: upcomingBirthdays.rows,
+    upcoming_anniversaries: upcomingAnniversaries.rows,
+  };
+}
+
+async function loadMilestoneMessages(userId) {
+  const summaryResult = await query(
+    `SELECT
+       COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+       COUNT(*) FILTER (WHERE status = 'sent') AS sent
+     FROM milestone_messages
+     WHERE user_id = $1`,
+    [userId]
+  );
+
+  const messageResult = await query(
+    `SELECT m.id, m.customer_id, c.name AS customer_name, m.milestone_type, m.target_date,
+            m.scheduled_for, m.sent_at, m.status, m.message_text
+     FROM milestone_messages m
+     LEFT JOIN customers c ON c.id = m.customer_id
+     WHERE m.user_id = $1
+     ORDER BY m.created_at DESC
+     LIMIT 10`,
+    [userId]
+  );
+
+  return {
+    pending: Number(summaryResult.rows[0]?.pending || 0),
+    sent: Number(summaryResult.rows[0]?.sent || 0),
+    messages: messageResult.rows,
+  };
+}
+
+function buildScheduledForTimestamp(targetDate) {
+  const date = new Date(targetDate);
+  if (Number.isNaN(date.getTime())) {
+    return new Date();
+  }
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 7, 0, 0);
+}
+
+async function insertMilestoneMessage(userId, customerId, type, targetDate, messageText, status, sentAt = null, scheduledFor = null) {
+  const scheduledTimestamp = scheduledFor || buildScheduledForTimestamp(targetDate);
+  const result = await query(
+    `INSERT INTO milestone_messages (user_id, customer_id, milestone_type, target_date, scheduled_for, sent_at, status, message_text, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+     RETURNING *`,
+    [userId, customerId, type, targetDate, scheduledTimestamp, sentAt, status, messageText]
+  );
+  return result.rows[0];
+}
+
+async function updateMilestoneMessageStatus(messageId, status, sentAt = null) {
+  await query(
+    `UPDATE milestone_messages
+     SET status = $1, sent_at = $2, updated_at = NOW()
+     WHERE id = $3`,
+    [status, sentAt, messageId]
+  );
+}
+
+async function queueMilestoneMessage(userId, customer, type) {
+  if (!customer || !customer.id) {
+    return null;
+  }
+
+  const targetDate = type === 'anniversary' ? customer.anniversary : customer.birthday;
+  if (!targetDate) {
+    return null;
+  }
+
+  const nextDate = await getNextMilestoneDate(targetDate);
+  if (!nextDate) {
+    return null;
+  }
+
+  if (await hasMilestoneMessageBeenRecorded(userId, customer.id, type, nextDate)) {
+    return null;
+  }
+
+  const userTemplates = await getUserMilestoneTemplates(userId);
+  const messageText = buildMilestoneMessage(customer, userTemplates, type, nextDate);
+  const scheduledFor = buildScheduledForTimestamp(nextDate);
+
+  return await insertMilestoneMessage(userId, customer.id, type, nextDate, messageText, 'pending', null, scheduledFor);
+}
+
+async function getPendingMilestoneMessagesForDate(dateValue) {
+  const result = await query(
+    `SELECT m.*, c.name AS customer_name, c.phone, c.email, c.city, c.birthday, c.anniversary,
+            u.shop_name, u.birthday_message_template, u.anniversary_message_template
+     FROM milestone_messages m
+     LEFT JOIN customers c ON c.id = m.customer_id
+     LEFT JOIN users u ON u.id = m.user_id
+     WHERE m.channel = 'whatsapp'
+       AND m.target_date = $1
+       AND m.status IN ('pending', 'failed')`,
+    [dateValue]
+  );
+  return result.rows;
+}
+
+async function sendExistingMilestoneMessage(record) {
+  if (!record || !record.phone) {
+    await updateMilestoneMessageStatus(record.id, 'failed', null);
+    return null;
+  }
+
+  try {
+    await whatsappService.sendMessage(record.user_id, record.phone, record.message_text);
+    await updateMilestoneMessageStatus(record.id, 'sent', new Date());
+    return record;
+  } catch (err) {
+    logger.error('Failed to send existing milestone message:', err.message);
+    await updateMilestoneMessageStatus(record.id, 'failed', null);
+    return null;
+  }
+}
+
+async function hasMilestoneMessageBeenRecorded(userId, customerId, type, targetDate) {
+  const result = await query(
+    `SELECT 1 FROM milestone_messages
+     WHERE user_id = $1 AND customer_id = $2 AND milestone_type = $3 AND target_date = $4
+     LIMIT 1`,
+    [userId, customerId, type, targetDate]
+  );
+  return result.rows.length > 0;
+}
+
+async function getCustomerForMilestone(userId, customerId) {
+  const result = await query(
+    `SELECT id, name, phone, email, city, birthday, anniversary
+     FROM customers
+     WHERE id = $1 AND user_id = $2
+     LIMIT 1`,
+    [customerId, userId]
+  );
+  return result.rows[0] || null;
+}
+
+async function getNextMilestoneDate(dateValue) {
+  if (!dateValue) return null;
+  const original = new Date(dateValue);
+  if (Number.isNaN(original.getTime())) return null;
+
+  const now = new Date();
+  const thisYear = new Date(now.getFullYear(), original.getMonth(), original.getDate());
+  if (thisYear >= new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
+    return thisYear.toISOString().slice(0, 10);
+  }
+
+  const nextYear = new Date(now.getFullYear() + 1, original.getMonth(), original.getDate());
+  return nextYear.toISOString().slice(0, 10);
+}
+
+async function sendMilestoneMessageRecord(userId, customer, type, messageText, targetDate) {
+  if (!customer.phone) {
+    return await insertMilestoneMessage(userId, customer.id, type, targetDate, messageText, 'failed', null);
+  }
+
+  try {
+    await whatsappService.sendMessage(userId, customer.phone, messageText);
+    return await insertMilestoneMessage(userId, customer.id, type, targetDate, messageText, 'sent', new Date());
+  } catch (err) {
+    logger.error('Failed to send milestone message:', err.message);
+    return await insertMilestoneMessage(userId, customer.id, type, targetDate, messageText, 'failed', null);
+  }
 }
 
 class BusinessService {
@@ -170,7 +493,17 @@ class BusinessService {
       values
     );
 
-    return result.rows[0] || null;
+    const updatedCustomer = result.rows[0] || null;
+    if (updatedCustomer) {
+      if (updatedCustomer.auto_birthday && updatedCustomer.birthday) {
+        await queueMilestoneMessage(userId, updatedCustomer, 'birthday');
+      }
+      if (updatedCustomer.auto_anniversary && updatedCustomer.anniversary) {
+        await queueMilestoneMessage(userId, updatedCustomer, 'anniversary');
+      }
+    }
+
+    return updatedCustomer;
   }
 
   async createCustomer(userId, customer) {
@@ -200,7 +533,18 @@ class BusinessService {
        RETURNING ${returningFields}`,
       values
     );
-    return result.rows[0];
+    const createdCustomer = result.rows[0];
+
+    if (createdCustomer) {
+      if (createdCustomer.auto_birthday && createdCustomer.birthday) {
+        await queueMilestoneMessage(userId, createdCustomer, 'birthday');
+      }
+      if (createdCustomer.auto_anniversary && createdCustomer.anniversary) {
+        await queueMilestoneMessage(userId, createdCustomer, 'anniversary');
+      }
+    }
+
+    return createdCustomer;
   }
 
   async findOrCreateCustomer(userId, customer) {
@@ -701,23 +1045,7 @@ class BusinessService {
       [userId]
     ) : { rows: [] };
 
-    const upcomingBirthdays = hasBirthday ? await query(
-      `SELECT id, name, phone, email, birthday
-       FROM customers
-       WHERE user_id = $1 AND birthday IS NOT NULL
-       ORDER BY birthday ASC
-       LIMIT 5`,
-      [userId]
-    ) : { rows: [] };
-
-    const upcomingAnniversaries = hasAnniversary ? await query(
-      `SELECT id, name, phone, email, anniversary
-       FROM customers
-       WHERE user_id = $1 AND anniversary IS NOT NULL
-       ORDER BY anniversary ASC
-       LIMIT 5`,
-      [userId]
-    ) : { rows: [] };
+    const upcoming = await buildUpcomingMilestones(userId);
 
     return {
       total_customers: Number(summaryResult.rows[0].total_customers || 0),
@@ -728,9 +1056,159 @@ class BusinessService {
       top_product: topProductResult.rows[0]?.product_name || null,
       top_cities: topCities.rows,
       top_regions: topRegions.rows,
-      upcoming_birthdays: upcomingBirthdays.rows,
-      upcoming_anniversaries: upcomingAnniversaries.rows,
+      upcoming_birthdays: upcoming.upcoming_birthdays,
+      upcoming_anniversaries: upcoming.upcoming_anniversaries,
     };
+  }
+
+  async getMilestoneMessages(userId) {
+    logger.debug(`Fetching milestone messages for user ${userId}`);
+    return await loadMilestoneMessages(userId);
+  }
+
+  async generateMilestoneMessage(userId, customerId, milestoneType) {
+    logger.debug(`Generating milestone message for user ${userId}, customer ${customerId}, type ${milestoneType}`);
+
+    const customer = await getCustomerForMilestone(userId, customerId);
+    if (!customer) {
+      throw new Error('Customer not found');
+    }
+
+    const targetDate = milestoneType === 'anniversary' ? customer.anniversary : customer.birthday;
+    if (!targetDate) {
+      throw new Error(`${milestoneType} date is not available for this customer`);
+    }
+
+    const nextDate = await getNextMilestoneDate(targetDate);
+    const userTemplates = await getUserMilestoneTemplates(userId);
+    const messageText = buildMilestoneMessage(customer, userTemplates, milestoneType, nextDate);
+
+    return {
+      customer_id: customer.id,
+      customer_name: customer.name,
+      milestone_type: milestoneType,
+      target_date: nextDate,
+      message_text: messageText,
+      day_name: formatMilestoneDate(nextDate),
+    };
+  }
+
+  async sendMilestoneMessage(userId, customerId, milestoneType, messageText) {
+    logger.debug(`Sending milestone message for user ${userId}, customer ${customerId}, type ${milestoneType}`);
+
+    const customer = await getCustomerForMilestone(userId, customerId);
+    if (!customer) {
+      throw new Error('Customer not found');
+    }
+
+    const targetDate = milestoneType === 'anniversary' ? customer.anniversary : customer.birthday;
+    if (!targetDate) {
+      throw new Error(`${milestoneType} date is not available for this customer`);
+    }
+
+    const nextDate = await getNextMilestoneDate(targetDate);
+    const textToSend = messageText || buildMilestoneMessage(customer, await getUserMilestoneTemplates(userId), milestoneType, nextDate);
+    return await sendMilestoneMessageRecord(userId, customer, milestoneType, textToSend, nextDate);
+  }
+
+  async saveMilestoneTemplates(userId, templates) {
+    const fields = [];
+    const values = [];
+
+    if (typeof templates.birthday_message_template === 'string') {
+      fields.push('birthday_message_template = $' + (values.length + 1));
+      values.push(templates.birthday_message_template);
+    }
+    if (typeof templates.anniversary_message_template === 'string') {
+      fields.push('anniversary_message_template = $' + (values.length + 1));
+      values.push(templates.anniversary_message_template);
+    }
+
+    if (!fields.length) {
+      return null;
+    }
+
+    const hasBirthdayTemplate = await userHasColumn('birthday_message_template');
+    const hasAnniversaryTemplate = await userHasColumn('anniversary_message_template');
+    if (!hasBirthdayTemplate && !hasAnniversaryTemplate) {
+      return null;
+    }
+
+    values.push(userId);
+    const result = await query(
+      `UPDATE users
+       SET ${fields.join(', ')}, updated_at = NOW()
+       WHERE id = $${values.length}
+       RETURNING birthday_message_template, anniversary_message_template`,
+      values
+    );
+    return result.rows[0];
+  }
+
+  async getMilestoneTemplates(userId) {
+    return await getUserMilestoneTemplates(userId);
+  }
+
+  async runScheduledMilestoneMessages() {
+    logger.debug('Running scheduled milestone message delivery');
+
+    const today = new Date().toISOString().slice(0, 10);
+    const pendingMessages = await getPendingMilestoneMessagesForDate(today);
+
+    for (const message of pendingMessages) {
+      await sendExistingMilestoneMessage(message);
+    }
+
+    const result = await query(
+      `SELECT c.id AS customer_id,
+              c.user_id,
+              c.name,
+              c.phone,
+              c.email,
+              c.city,
+              c.birthday,
+              c.anniversary,
+              c.auto_birthday,
+              c.auto_anniversary,
+              u.shop_name,
+              u.birthday_message_template,
+              u.anniversary_message_template
+       FROM customers c
+       JOIN users u ON u.id = c.user_id
+       WHERE (c.auto_birthday = TRUE AND c.birthday IS NOT NULL AND EXTRACT(MONTH FROM c.birthday) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(DAY FROM c.birthday) = EXTRACT(DAY FROM CURRENT_DATE))
+          OR (c.auto_anniversary = TRUE AND c.anniversary IS NOT NULL AND EXTRACT(MONTH FROM c.anniversary) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(DAY FROM c.anniversary) = EXTRACT(DAY FROM CURRENT_DATE))`,
+      []
+    );
+
+    for (const row of result.rows) {
+      const milestoneType = row.auto_birthday && row.birthday && new Date(row.birthday).getMonth() === new Date().getMonth() && new Date(row.birthday).getDate() === new Date().getDate()
+        ? 'birthday'
+        : 'anniversary';
+
+      const targetDate = milestoneType === 'anniversary' ? row.anniversary : row.birthday;
+      const nextDate = await getNextMilestoneDate(targetDate);
+      if (!nextDate) {
+        continue;
+      }
+
+      const alreadyRecorded = await hasMilestoneMessageBeenRecorded(row.user_id, row.customer_id, milestoneType, nextDate);
+      if (alreadyRecorded) {
+        continue;
+      }
+
+      const messageText = buildMilestoneMessage(
+        row,
+        {
+          birthday_message_template: row.birthday_message_template || getDefaultMilestoneTemplate('birthday'),
+          anniversary_message_template: row.anniversary_message_template || getDefaultMilestoneTemplate('anniversary'),
+          business_name: row.shop_name || 'Your business',
+        },
+        milestoneType,
+        nextDate
+      );
+
+      await insertMilestoneMessage(row.user_id, row.customer_id, milestoneType, nextDate, messageText, 'pending', null, buildScheduledForTimestamp(nextDate));
+    }
   }
 
   async getInvoiceAnalytics(userId) {

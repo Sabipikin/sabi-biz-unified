@@ -23,6 +23,7 @@ const { query, testConnection } = require('./config/db');
 console.log('[STARTUP] Loading dbRetry module...');
 const { ensureDbConnected } = require('./config/dbRetry');
 const adminUserService = require('./services/adminUserService');
+const businessService = require('./services/businessService');
 console.log('[STARTUP] Loading middleware...');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 

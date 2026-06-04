@@ -121,6 +121,17 @@ const API = {
       body: JSON.stringify(data),
     }),
     invoiceAnalytics: () => API.request('/api/business/invoices/analytics'),
+    milestoneMessages: () => API.request('/api/business/milestones'),
+    milestoneTemplates: () => API.request('/api/business/milestones/templates'),
+    saveMilestoneTemplates: (data) => API.request('/api/business/milestones/templates', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+    generateMilestoneMessage: (customerId, type) => API.request(`/api/business/milestones/generate?customerId=${encodeURIComponent(customerId)}&type=${encodeURIComponent(type)}`),
+    sendMilestoneMessage: (data) => API.request('/api/business/milestones/send', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
     inventory: () => API.request('/api/business/inventory'),
     createInventoryItem: (data) => API.request('/api/business/inventory', {
       method: 'POST',
@@ -257,6 +268,12 @@ function formatMoney(value) {
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleDateString() : '-';
+}
+
+function formatExactDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 }
 
 function normalizePhoneNumber(phone = '') {
@@ -662,12 +679,14 @@ async function navigateDashboard(route) {
 }
 
 async function renderOverview() {
-  const [invoicesRes, inventoryRes, salesRes, salesAnalyticsRes, invoiceAnalyticsRes] = await Promise.all([
+  const [invoicesRes, inventoryRes, salesRes, salesAnalyticsRes, invoiceAnalyticsRes, customersAnalyticsRes, milestoneMessagesRes] = await Promise.all([
     API.business.invoices(),
     API.business.inventory(),
     API.business.sales(),
     API.business.salesAnalytics(),
     API.business.invoiceAnalytics(),
+    API.business.customersAnalytics(),
+    API.business.milestoneMessages(),
   ]);
   const analyticsRes = await API.analytics.metrics();
 
@@ -676,12 +695,17 @@ async function renderOverview() {
   const sales = getResponseData(salesRes);
   const salesAnalytics = getResponseData(salesAnalyticsRes, {});
   const invoiceAnalytics = getResponseData(invoiceAnalyticsRes, {});
+  const customersAnalytics = getResponseData(customersAnalyticsRes, {});
+  const milestoneMessages = getResponseData(milestoneMessagesRes, { pending: 0, sent: 0, messages: [] });
   const metrics = getResponseData(analyticsRes);
   const errors = [
     getResponseError(invoicesRes, 'Invoices could not be loaded.'),
     getResponseError(inventoryRes, 'Inventory could not be loaded.'),
     getResponseError(salesRes, 'Sales could not be loaded.'),
     getResponseError(salesAnalyticsRes, 'Sales analytics could not be loaded.'),
+    getResponseError(invoiceAnalyticsRes, 'Invoice analytics could not be loaded.'),
+    getResponseError(customersAnalyticsRes, 'Customer analytics could not be loaded.'),
+    getResponseError(milestoneMessagesRes, 'Milestone messages could not be loaded.'),
     getResponseError(analyticsRes, 'Analytics could not be loaded.'),
   ].filter(Boolean);
   const revenue = invoices
@@ -710,8 +734,112 @@ async function renderOverview() {
       </div>
       ${renderSalesOverviewSection(salesAnalytics)}
       ${renderInvoiceAnalyticsSection(invoiceAnalytics)}
+      ${renderMilestoneOverviewSection(customersAnalytics, milestoneMessages)}
       ${renderSalesTrendSection(salesTrend)}
       ${renderRecentMetrics(metrics)}
+    </div>
+  `;
+
+  document.getElementById('editMilestoneTemplatesButton')?.addEventListener('click', async () => {
+    const templatesRes = await API.business.milestoneTemplates();
+    const templates = getResponseData(templatesRes, {});
+    if (!templates) {
+      notify(getResponseError(templatesRes, 'Unable to load milestone templates.'), 'error');
+      return;
+    }
+
+    const birthdayTemplate = window.prompt('Edit birthday message template', templates.birthday_message_template || '');
+    if (birthdayTemplate === null) return;
+    const anniversaryTemplate = window.prompt('Edit anniversary message template', templates.anniversary_message_template || '');
+    if (anniversaryTemplate === null) return;
+
+    const saveRes = await API.business.saveMilestoneTemplates({
+      birthday_message_template: birthdayTemplate,
+      anniversary_message_template: anniversaryTemplate,
+    });
+    if (!getResponseData(saveRes, null)) {
+      notify(getResponseError(saveRes, 'Failed to save milestone templates.'), 'error');
+      return;
+    }
+    notify('Milestone templates updated successfully.');
+  });
+
+  document.querySelectorAll('.generate-milestone-message').forEach(button => {
+    button.addEventListener('click', async () => {
+      const customerId = button.dataset.customerId;
+      const milestoneType = button.dataset.milestoneType;
+      const messageRes = await API.business.generateMilestoneMessage(customerId, milestoneType);
+      const messageData = getResponseData(messageRes, null);
+      if (!messageData) {
+        notify(getResponseError(messageRes, 'Unable to generate milestone message.'), 'error');
+        return;
+      }
+
+      const editedMessage = window.prompt(`Edit ${milestoneType} message for ${messageData.customer_name}`, messageData.message_text);
+      if (editedMessage === null) return;
+
+      const sendRes = await API.business.sendMilestoneMessage({
+        customerId,
+        milestoneType,
+        messageText: editedMessage,
+      });
+      if (!getResponseData(sendRes, null)) {
+        notify(getResponseError(sendRes, 'Failed to send milestone message.'), 'error');
+        return;
+      }
+      notify('Milestone message is queued for delivery.');
+      await renderOverview();
+    });
+  });
+}
+
+function renderMilestoneOverviewSection(analytics, milestoneMessages) {
+  const upcomingBirthdays = analytics?.upcoming_birthdays || [];
+  const upcomingAnniversaries = analytics?.upcoming_anniversaries || [];
+  return `
+    <div class="subsection compact-overview">
+      <h3>Milestone Messages</h3>
+      <div class="overview-grid">
+        <div class="overview-card">
+          <h4>Pending</h4>
+          <p>${milestoneMessages.pending || 0}</p>
+        </div>
+        <div class="overview-card">
+          <h4>Sent</h4>
+          <p>${milestoneMessages.sent || 0}</p>
+        </div>
+        <div class="overview-card milestone-templates-card">
+          <h4>Message Templates</h4>
+          <p>Use the default templates or edit them to personalize every milestone.</p>
+          <button type="button" id="editMilestoneTemplatesButton" class="btn small">Edit templates</button>
+        </div>
+      </div>
+      <div class="overview-grid milestone-event-grid">
+        <div class="overview-card">
+          <h4>Upcoming Birthdays</h4>
+          <ul class="event-list">
+            ${upcomingBirthdays.length ? upcomingBirthdays.map(customer => `
+              <li>
+                <strong>${escapeHtml(customer.name)}</strong><br>
+                ${formatExactDate(customer.next_date)}<br>
+                <button type="button" class="btn small generate-milestone-message" data-customer-id="${escapeHtml(customer.id)}" data-milestone-type="birthday">Generate message</button>
+              </li>
+            `).join('') : '<li>No birthdays in the next 30 days</li>'}
+          </ul>
+        </div>
+        <div class="overview-card">
+          <h4>Upcoming Anniversaries</h4>
+          <ul class="event-list">
+            ${upcomingAnniversaries.length ? upcomingAnniversaries.map(customer => `
+              <li>
+                <strong>${escapeHtml(customer.name)}</strong><br>
+                ${formatExactDate(customer.next_date)}<br>
+                <button type="button" class="btn small generate-milestone-message" data-customer-id="${escapeHtml(customer.id)}" data-milestone-type="anniversary">Generate message</button>
+              </li>
+            `).join('') : '<li>No anniversaries in the next 30 days</li>'}
+          </ul>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -1683,6 +1811,12 @@ async function renderCustomerDetail(customerId) {
             <p>Anniversary: ${customer.anniversary ? formatDate(customer.anniversary) : '-'}</p>
             <p>Auto birthday messages: ${customer.auto_birthday ? 'Enabled' : 'Disabled'}</p>
             <p>Auto anniversary messages: ${customer.auto_anniversary ? 'Enabled' : 'Disabled'}</p>
+            <div class="button-row milestone-actions">
+              ${customer.birthday ? `<button type="button" id="generateBirthdayForCustomer" class="btn small">Generate birthday message</button>` : ''}
+              ${customer.birthday ? `<button type="button" id="sendBirthdayForCustomer" class="btn small">Send birthday message</button>` : ''}
+              ${customer.anniversary ? `<button type="button" id="generateAnniversaryForCustomer" class="btn small">Generate anniversary message</button>` : ''}
+              ${customer.anniversary ? `<button type="button" id="sendAnniversaryForCustomer" class="btn small">Send anniversary message</button>` : ''}
+            </div>
           </div>
           <form id="customerDetailForm" class="detail-form" style="display:none">
             <div class="detail-card">
@@ -1878,6 +2012,54 @@ async function renderCustomerDetail(customerId) {
       }
     });
   }
+
+  async function handleCustomerMilestoneAction(type, showEditDialog) {
+    const messageRes = await API.business.generateMilestoneMessage(customerId, type);
+    const messageData = getResponseData(messageRes, null);
+    if (!messageData) {
+      notify(getResponseError(messageRes, `Unable to generate ${type} message.`), 'error');
+      return;
+    }
+
+    let finalText = messageData.message_text;
+    if (showEditDialog) {
+      const edited = window.prompt(`Edit ${type} message for ${messageData.customer_name}`, finalText);
+      if (edited === null) {
+        return;
+      }
+      finalText = edited.trim();
+      if (!finalText) {
+        notify('Message cannot be empty.', 'error');
+        return;
+      }
+    }
+
+    const sendRes = await API.business.sendMilestoneMessage({
+      customerId,
+      milestoneType: type,
+      messageText: finalText,
+    });
+
+    if (!getResponseData(sendRes, null)) {
+      notify(getResponseError(sendRes, `Failed to send ${type} message.`), 'error');
+      return;
+    }
+
+    notify(`${type === 'birthday' ? 'Birthday' : 'Anniversary'} message sent. If auto send failed, use the send button again.`);
+  }
+
+  document.getElementById('generateBirthdayForCustomer')?.addEventListener('click', async () => {
+    await handleCustomerMilestoneAction('birthday', true);
+  });
+  document.getElementById('sendBirthdayForCustomer')?.addEventListener('click', async () => {
+    await handleCustomerMilestoneAction('birthday', false);
+  });
+  document.getElementById('generateAnniversaryForCustomer')?.addEventListener('click', async () => {
+    await handleCustomerMilestoneAction('anniversary', true);
+  });
+  document.getElementById('sendAnniversaryForCustomer')?.addEventListener('click', async () => {
+    await handleCustomerMilestoneAction('anniversary', false);
+  });
 
   // Start in view mode
   showView();
@@ -2255,15 +2437,62 @@ function renderSalesTable(sales) {
   `;
 }
 
-function renderWhatsApp() {
+async function renderWhatsApp() {
+  const [customersRes, templatesRes] = await Promise.all([
+    API.business.customers(),
+    API.business.milestoneTemplates(),
+  ]);
+
+  const customers = getResponseData(customersRes, []);
+  const templates = getResponseData(templatesRes, {
+    birthday_message_template: '',
+    anniversary_message_template: '',
+  });
+
+  const customerOptions = customers.map(customer => `
+    <option value="${escapeHtml(customer.id)}">${escapeHtml(customer.name)}${customer.phone ? ` — ${escapeHtml(customer.phone)}` : ''}</option>
+  `).join('');
+
   document.getElementById('content').innerHTML = `
     <div class="panel">
       <div class="panel-header">
         <div>
           <h2>WhatsApp</h2>
-          <p>Send customer messages from your connected WhatsApp setup.</p>
+          <p>Send personalized milestone messages and WhatsApp updates from one place.</p>
         </div>
       </div>
+
+      <div class="subsection compact-overview">
+        <h3>Milestone Message Generator</h3>
+        <div class="overview-grid milestone-event-grid">
+          <div class="overview-card milestone-card">
+            <h4>Birthday message</h4>
+            <p>${escapeHtml(templates.birthday_message_template)}</p>
+            <button type="button" id="generateBirthdayMessage" class="btn small">Generate for selected customer</button>
+          </div>
+          <div class="overview-card milestone-card">
+            <h4>Anniversary message</h4>
+            <p>${escapeHtml(templates.anniversary_message_template)}</p>
+            <button type="button" id="generateAnniversaryMessage" class="btn small">Generate for selected customer</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="milestoneCustomerSelect">Customer</label>
+          <select id="milestoneCustomerSelect" class="wide-select">
+            <option value="">Select customer</option>
+            ${customerOptions}
+          </select>
+        </div>
+        <div id="milestoneMessagePreview" class="form-group milestone-preview" style="display:none">
+          <label>Generated message</label>
+          <textarea id="milestoneMessageText" rows="6"></textarea>
+          <div class="button-row">
+            <button type="button" id="editMilestoneMessageButton" class="btn secondary">Edit message</button>
+            <button type="button" id="sendMilestoneMessageButton" class="btn-primary">Send milestone message</button>
+          </div>
+        </div>
+      </div>
+
       <form id="whatsappForm" class="form-grid">
         <div class="form-group">
           <label for="toPhone">Phone Number</label>
@@ -2284,6 +2513,79 @@ function renderWhatsApp() {
       </form>
     </div>
   `;
+
+  let generatedType = null;
+  let generatedCustomerId = null;
+
+  const milestoneMessagePreview = document.getElementById('milestoneMessagePreview');
+  const milestoneMessageText = document.getElementById('milestoneMessageText');
+  const customerSelect = document.getElementById('milestoneCustomerSelect');
+  const sendButton = document.getElementById('sendMilestoneMessageButton');
+
+  async function generateMessage(type) {
+    const customerId = customerSelect?.value;
+    if (!customerId) {
+      notify('Please select a customer to personalize the message.', 'error');
+      return;
+    }
+
+    const messageRes = await API.business.generateMilestoneMessage(customerId, type);
+    const messageData = getResponseData(messageRes, null);
+    if (!messageData) {
+      notify(getResponseError(messageRes, 'Unable to generate milestone message.'), 'error');
+      return;
+    }
+
+    generatedType = type;
+    generatedCustomerId = customerId;
+    milestoneMessageText.value = messageData.message_text;
+    milestoneMessagePreview.style.display = 'block';
+    notify(`${type === 'birthday' ? 'Birthday' : 'Anniversary'} message generated. You can edit it before sending.`);
+  }
+
+  document.getElementById('generateBirthdayMessage')?.addEventListener('click', async () => {
+    await generateMessage('birthday');
+  });
+
+  document.getElementById('generateAnniversaryMessage')?.addEventListener('click', async () => {
+    await generateMessage('anniversary');
+  });
+
+  document.getElementById('editMilestoneMessageButton')?.addEventListener('click', () => {
+    if (!milestoneMessagePreview || milestoneMessagePreview.style.display === 'none') {
+      notify('Generate a milestone message first.', 'error');
+      return;
+    }
+    milestoneMessageText.focus();
+  });
+
+  sendButton?.addEventListener('click', async () => {
+    if (!generatedCustomerId || !generatedType) {
+      notify('Generate a message before sending.', 'error');
+      return;
+    }
+    const text = milestoneMessageText.value.trim();
+    if (!text) {
+      notify('Message cannot be empty.', 'error');
+      return;
+    }
+
+    const sendRes = await API.business.sendMilestoneMessage({
+      customerId: generatedCustomerId,
+      milestoneType: generatedType,
+      messageText: text,
+    });
+    if (!getResponseData(sendRes, null)) {
+      notify(getResponseError(sendRes, 'Failed to send milestone message.'), 'error');
+      return;
+    }
+
+    notify('Milestone message sent. It will be retried automatically if delivery fails.');
+    milestoneMessagePreview.style.display = 'none';
+    generatedType = null;
+    generatedCustomerId = null;
+    customerSelect.value = '';
+  });
 
   document.getElementById('whatsappForm').addEventListener('submit', async (event) => {
     event.preventDefault();
