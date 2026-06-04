@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node -e \"console.log('Starting dev server on http://localhost:5173')\" && npx http-server ./public -p 5173 -g",
     "build": "node scripts/write-env.cjs",
-    "serve": "npx http-server ./public -p 5173"
+    "serve": "npx http-server ./public -p 5173",
+    "test": "node tests/run-validation-tests.cjs"
   },
   "keywords": [
     "pwa",

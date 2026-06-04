@@ -16,25 +16,110 @@ class BusinessService {
   async getCustomers(userId) {
     logger.debug(`Fetching customers for user ${userId}`);
     const result = await query(
-      `SELECT id, name, phone, email, created_at
-       FROM customers
-       WHERE user_id = $1
-       ORDER BY name ASC`,
+      `SELECT c.id, c.name, c.phone, c.email, c.city, c.region, c.delivery_address,
+              c.birthday, c.anniversary, c.auto_birthday, c.auto_anniversary,
+              c.created_at, c.updated_at,
+              COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1), 0) AS invoice_count,
+              COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1 AND i.status = 'paid'), 0) AS paid_invoices,
+              COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1 AND i.status != 'paid'), 0) AS pending_invoices,
+              COALESCE((SELECT SUM(amount) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1), 0) AS total_spent,
+              COALESCE((SELECT SUM(ii.total_price - ii.cost_price) FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id WHERE i.customer_id = c.id AND i.user_id = $1), 0) AS total_profit
+       FROM customers c
+       WHERE c.user_id = $1
+       ORDER BY c.name ASC`,
       [userId]
     );
     return result.rows;
   }
 
+  async getCustomerById(userId, customerId) {
+    logger.debug(`Fetching customer ${customerId} for user ${userId}`);
+
+    const customerResult = await query(
+      `SELECT c.id, c.name, c.phone, c.email, c.city, c.region, c.delivery_address,
+              c.birthday, c.anniversary, c.auto_birthday, c.auto_anniversary,
+              COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1), 0) AS invoice_count,
+              COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1 AND i.status = 'paid'), 0) AS paid_invoices,
+              COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1 AND i.status != 'paid'), 0) AS pending_invoices,
+              COALESCE((SELECT SUM(amount) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1), 0) AS total_spent,
+              COALESCE((SELECT SUM(ii.total_price - ii.cost_price) FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id WHERE i.customer_id = c.id AND i.user_id = $1), 0) AS total_profit,
+              c.created_at, c.updated_at
+       FROM customers c
+       WHERE c.user_id = $1 AND c.id = $2
+       LIMIT 1`,
+      [userId, customerId]
+    );
+
+    if (!customerResult.rows.length) {
+      return null;
+    }
+
+    const invoicesResult = await query(
+      `SELECT i.id, i.customer_id, i.amount, i.status, i.due_date, i.paid_date, i.created_at
+       FROM invoices i
+       WHERE i.user_id = $1 AND i.customer_id = $2
+       ORDER BY i.created_at DESC`,
+      [userId, customerId]
+    );
+
+    return {
+      ...customerResult.rows[0],
+      invoices: invoicesResult.rows,
+    };
+  }
+
+  async updateCustomer(userId, customerId, customer) {
+    const result = await query(
+      `UPDATE customers
+       SET name = $1,
+           phone = $2,
+           email = $3,
+           city = $4,
+           region = $5,
+           delivery_address = $6,
+           birthday = $7,
+           anniversary = $8,
+           auto_birthday = $9,
+           auto_anniversary = $10,
+           updated_at = NOW()
+       WHERE user_id = $11 AND id = $12
+       RETURNING id, name, phone, email, city, region, delivery_address, birthday, anniversary, auto_birthday, auto_anniversary, created_at, updated_at`,
+      [
+        customer.name,
+        customer.phone || null,
+        customer.email || null,
+        customer.city || null,
+        customer.region || null,
+        customer.delivery_address || null,
+        customer.birthday || null,
+        customer.anniversary || null,
+        parseBool(customer.auto_birthday),
+        parseBool(customer.auto_anniversary),
+        userId,
+        customerId,
+      ]
+    );
+
+    return result.rows[0] || null;
+  }
+
   async createCustomer(userId, customer) {
     const result = await query(
-      `INSERT INTO customers (user_id, name, phone, email, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, NOW(), NOW())
-       RETURNING id, name, phone, email, created_at`,
+      `INSERT INTO customers (user_id, name, phone, email, city, region, delivery_address, birthday, anniversary, auto_birthday, auto_anniversary, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+       RETURNING id, name, phone, email, city, region, delivery_address, birthday, anniversary, auto_birthday, auto_anniversary, created_at, updated_at`,
       [
         userId,
         customer.name,
         customer.phone || null,
         customer.email || null,
+        customer.city || null,
+        customer.region || null,
+        customer.delivery_address || null,
+        customer.birthday || null,
+        customer.anniversary || null,
+        parseBool(customer.auto_birthday),
+        parseBool(customer.auto_anniversary),
       ]
     );
     return result.rows[0];
@@ -47,7 +132,7 @@ class BusinessService {
 
     if (customer.customer_id) {
       const result = await query(
-        `SELECT id, name, phone, email
+        `SELECT id, name, phone, email, city, region, delivery_address, birthday, anniversary
          FROM customers
          WHERE id = $1 AND user_id = $2
          LIMIT 1`,
@@ -82,6 +167,13 @@ class BusinessService {
       name,
       phone: phone || null,
       email: customer.customer_email || null,
+      city: customer.city || null,
+      region: customer.region || null,
+      delivery_address: customer.delivery_address || null,
+      birthday: customer.birthday || null,
+      anniversary: customer.anniversary || null,
+      auto_birthday: customer.auto_birthday || false,
+      auto_anniversary: customer.auto_anniversary || false,
     });
   }
 
@@ -90,6 +182,8 @@ class BusinessService {
     const invoiceResult = await query(
       `SELECT i.id, i.customer_id, COALESCE(c.name, i.customer_name) AS customer_name,
               COALESCE(c.phone, i.customer_phone) AS customer_phone,
+              COALESCE(c.email, i.customer_email) AS customer_email,
+              i.delivery_address,
               i.amount, i.description, i.status, i.due_date, i.paid_date,
               i.auto_mail, i.auto_whatsapp, i.sent_count, i.last_sent_method,
               i.created_at, i.updated_at
@@ -122,6 +216,8 @@ class BusinessService {
     const result = await query(
       `SELECT i.id, i.customer_id, COALESCE(c.name, i.customer_name) AS customer_name,
               COALESCE(c.phone, i.customer_phone) AS customer_phone,
+              COALESCE(c.email, i.customer_email) AS customer_email,
+              i.delivery_address,
               i.amount, i.description, i.status, i.due_date, i.paid_date,
               i.auto_mail, i.auto_whatsapp, i.sent_count, i.last_sent_method,
               i.created_at, i.updated_at,
@@ -154,20 +250,24 @@ class BusinessService {
       const autoWhatsapp = parseBool(invoice.auto_whatsapp);
       const customerName = customer?.name || invoice.customer_name || null;
       const customerPhone = customer?.phone || invoice.customer_phone || null;
+      const customerEmail = customer?.email || invoice.customer_email || null;
+      const deliveryAddress = invoice.delivery_address || null;
 
       const insertInvoice = await client.query(
         `INSERT INTO invoices (
-           user_id, customer_id, customer_name, customer_phone, amount, description,
-           status, due_date, auto_mail, auto_whatsapp, sent_count, last_sent_method,
+           user_id, customer_id, customer_name, customer_phone, customer_email, delivery_address,
+           amount, description, status, due_date, auto_mail, auto_whatsapp, sent_count, last_sent_method,
            created_at, updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, NULL, NOW(), NOW())
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 0, NULL, NOW(), NOW())
          RETURNING id`,
         [
           userId,
           customer?.id || null,
           customerName,
           customerPhone,
+          customerEmail,
+          deliveryAddress,
           amount,
           invoice.description || null,
           invoice.status || 'draft',
@@ -255,6 +355,8 @@ class BusinessService {
       const autoWhatsapp = parseBool(invoice.auto_whatsapp);
       const customerName = customer?.name || invoice.customer_name || null;
       const customerPhone = customer?.phone || invoice.customer_phone || null;
+      const customerEmail = customer?.email || invoice.customer_email || null;
+      const deliveryAddress = invoice.delivery_address || null;
 
       const previousItems = await client.query(
         `SELECT inventory_id, quantity FROM invoice_items WHERE invoice_id = $1`,
@@ -312,18 +414,22 @@ class BusinessService {
            customer_id = $1,
            customer_name = $2,
            customer_phone = $3,
-           amount = $4,
-           description = $5,
-           status = $6,
-           due_date = $7,
-           auto_mail = $8,
-           auto_whatsapp = $9,
+           customer_email = $4,
+           delivery_address = $5,
+           amount = $6,
+           description = $7,
+           status = $8,
+           due_date = $9,
+           auto_mail = $10,
+           auto_whatsapp = $11,
            updated_at = NOW()
-         WHERE id = $10 AND user_id = $11`,
+         WHERE id = $12 AND user_id = $13`,
         [
           customer?.id || null,
           customerName,
           customerPhone,
+          customerEmail,
+          deliveryAddress,
           amount,
           invoice.description || null,
           invoice.status || 'draft',
@@ -395,6 +501,100 @@ class BusinessService {
     );
 
     return sendResult;
+  }
+
+  async getCustomerAnalytics(userId) {
+    logger.debug(`Calculating customer analytics for user ${userId}`);
+
+    const summaryResult = await query(
+      `SELECT
+         COUNT(*) AS total_customers
+       FROM customers
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    const invoiceResult = await query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'paid') AS paid_invoices,
+         COUNT(*) FILTER (WHERE status != 'paid') AS pending_invoices,
+         COALESCE(SUM(amount), 0) AS total_revenue
+       FROM invoices
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    const profitResult = await query(
+      `SELECT COALESCE(SUM(ii.total_price - ii.cost_price), 0) AS total_profit
+       FROM invoice_items ii
+       JOIN invoices i ON i.id = ii.invoice_id
+       WHERE i.user_id = $1`,
+      [userId]
+    );
+
+    const topProductResult = await query(
+      `SELECT ii.product_name, SUM(ii.quantity) AS quantity_sold
+       FROM invoice_items ii
+       JOIN invoices i ON i.id = ii.invoice_id
+       WHERE i.user_id = $1 AND i.status = 'paid'
+       GROUP BY ii.product_name
+       ORDER BY quantity_sold DESC
+       LIMIT 1`,
+      [userId]
+    );
+
+    const topCities = await query(
+      `SELECT c.city, COUNT(*) AS customers, COALESCE(SUM(i.amount), 0) AS revenue
+       FROM customers c
+       LEFT JOIN invoices i ON i.customer_id = c.id AND i.user_id = $1
+       WHERE c.user_id = $1 AND c.city IS NOT NULL AND c.city <> ''
+       GROUP BY c.city
+       ORDER BY revenue DESC
+       LIMIT 5`,
+      [userId]
+    );
+
+    const topRegions = await query(
+      `SELECT c.region, COUNT(*) AS customers, COALESCE(SUM(i.amount), 0) AS revenue
+       FROM customers c
+       LEFT JOIN invoices i ON i.customer_id = c.id AND i.user_id = $1
+       WHERE c.user_id = $1 AND c.region IS NOT NULL AND c.region <> ''
+       GROUP BY c.region
+       ORDER BY revenue DESC
+       LIMIT 5`,
+      [userId]
+    );
+
+    const upcomingBirthdays = await query(
+      `SELECT id, name, phone, email, birthday
+       FROM customers
+       WHERE user_id = $1 AND birthday IS NOT NULL
+       ORDER BY birthday ASC
+       LIMIT 5`,
+      [userId]
+    );
+
+    const upcomingAnniversaries = await query(
+      `SELECT id, name, phone, email, anniversary
+       FROM customers
+       WHERE user_id = $1 AND anniversary IS NOT NULL
+       ORDER BY anniversary ASC
+       LIMIT 5`,
+      [userId]
+    );
+
+    return {
+      total_customers: Number(summaryResult.rows[0].total_customers || 0),
+      paid_invoices: Number(invoiceResult.rows[0].paid_invoices || 0),
+      pending_invoices: Number(invoiceResult.rows[0].pending_invoices || 0),
+      total_revenue: round(invoiceResult.rows[0].total_revenue || 0),
+      total_profit: round(profitResult.rows[0].total_profit || 0),
+      top_product: topProductResult.rows[0]?.product_name || null,
+      top_cities: topCities.rows,
+      top_regions: topRegions.rows,
+      upcoming_birthdays: upcomingBirthdays.rows,
+      upcoming_anniversaries: upcomingAnniversaries.rows,
+    };
   }
 
   async getInvoiceAnalytics(userId) {

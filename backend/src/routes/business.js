@@ -23,6 +23,39 @@ router.post('/customers', authMiddleware, async (req, res, next) => {
   }
 });
 
+router.get('/customers/analytics', authMiddleware, async (req, res, next) => {
+  try {
+    const analytics = await businessService.getCustomerAnalytics(req.user.userId);
+    res.json({ success: true, data: analytics });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/customers/:id', authMiddleware, async (req, res, next) => {
+  try {
+    const customer = await businessService.getCustomerById(req.user.userId, req.params.id);
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'Customer not found' });
+    }
+    res.json({ success: true, data: customer });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/customers/:id', authMiddleware, async (req, res, next) => {
+  try {
+    const customer = await businessService.updateCustomer(req.user.userId, req.params.id, req.body);
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'Customer not found' });
+    }
+    res.json({ success: true, data: customer });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/invoices', authMiddleware, async (req, res, next) => {
   try {
     const invoices = await businessService.getInvoices(req.user.userId);

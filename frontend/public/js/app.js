@@ -30,6 +30,7 @@ const dashboardRoutes = new Set([
   'invoices',
   'inventory',
   'whatsapp',
+  'customers',
   'subscriptions',
   'settings',
 ]);
@@ -96,8 +97,13 @@ const API = {
 
   business: {
     customers: () => API.request('/api/business/customers'),
+    customer: (id) => API.request(`/api/business/customers/${id}`),
     createCustomer: (data) => API.request('/api/business/customers', {
       method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    updateCustomer: (id, data) => API.request(`/api/business/customers/${id}`, {
+      method: 'PUT',
       body: JSON.stringify(data),
     }),
     invoices: () => API.request('/api/business/invoices'),
@@ -126,6 +132,7 @@ const API = {
       body: JSON.stringify(data),
     }),
     salesAnalytics: () => API.request('/api/business/sales/analytics'),
+    customersAnalytics: () => API.request('/api/business/customers/analytics'),
   },
 
   whatsapp: {
@@ -184,6 +191,15 @@ function normalizeRouteName(route) {
   return normalized || 'login';
 }
 
+function parseRouteHash(hash = window.location.hash) {
+  const sanitized = String(hash || '').trim().replace(/^#\/?/, '').replace(/\/+$/, '');
+  const segments = sanitized.split('/').filter(Boolean);
+  return {
+    page: (segments[0] || 'login').toLowerCase(),
+    id: segments[1] || null,
+  };
+}
+
 function getDefaultDashboardRoute() {
   const configuredRoute = normalizeRouteName(window.SABIBIZ_INITIAL_ROUTE || defaultRoute);
   return dashboardRoutes.has(configuredRoute) ? configuredRoute : 'dashboard';
@@ -211,7 +227,7 @@ function redirectDashboardHashToAppShell(route) {
 
 function getCurrentPage() {
   if (window.location.hash) {
-    return normalizeRouteName(window.location.hash);
+    return getCurrentRoute().page;
   }
 
   const path = window.location.pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
@@ -249,6 +265,7 @@ function buildInvoiceReceiptText(invoice) {
   lines.push(`Customer: ${invoice.customer_name || 'N/A'}`);
   if (invoice.customer_phone) lines.push(`Phone: ${invoice.customer_phone}`);
   if (invoice.customer_email) lines.push(`Email: ${invoice.customer_email}`);
+  if (invoice.delivery_address) lines.push(`Delivery Address: ${invoice.delivery_address}`);
   if (invoice.due_date) lines.push(`Due Date: ${formatDate(invoice.due_date)}`);
   if (invoice.description) lines.push(`Description: ${invoice.description}`);
   lines.push('');
@@ -323,6 +340,11 @@ function getResponseError(response, fallback = 'Unable to load this section.') {
   return response?.success ? '' : response?.message || fallback;
 }
 
+function capitalize(value) {
+  const text = String(value || '');
+  return text ? `${text.charAt(0).toUpperCase()}${text.slice(1).toLowerCase()}` : '';
+}
+
 function setButtonLoading(button, isLoading, loadingText) {
   if (!button) return;
 
@@ -335,6 +357,58 @@ function setButtonLoading(button, isLoading, loadingText) {
     button.disabled = false;
     delete button.dataset.originalText;
   }
+}
+
+function ensureEditSpinner() {
+  const btn = document.getElementById('toggleEditCustomer');
+  if (!btn) return null;
+  let spinner = btn.querySelector('.edit-spinner');
+  if (!spinner) {
+    spinner = document.createElement('span');
+    spinner.className = 'edit-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    btn.appendChild(spinner);
+  }
+  return { btn, spinner };
+}
+
+function showEditSpinner(show) {
+  const res = ensureEditSpinner();
+  if (!res) return;
+  if (show) {
+    res.spinner.classList.add('visible');
+    res.btn.disabled = true;
+  } else {
+    res.spinner.classList.remove('visible');
+    res.btn.disabled = false;
+  }
+}
+
+function formatPhoneAsYouType(val) {
+  if (!val) return '';
+  const hasPlus = String(val || '').trim().startsWith('+');
+  const digits = String(val || '').replace(/[^0-9]/g, '');
+  if (hasPlus) {
+    let cc = '';
+    let rest = digits;
+    if (digits.length > 10) {
+      cc = digits.slice(0, digits.length - 10);
+      rest = digits.slice(digits.length - 10);
+    } else if (digits.length <= 3) {
+      cc = digits;
+      rest = '';
+    }
+    let formattedRest = '';
+    if (!rest) formattedRest = '';
+    else if (rest.length <= 3) formattedRest = rest;
+    else if (rest.length <= 6) formattedRest = `${rest.slice(0,3)} ${rest.slice(3)}`;
+    else formattedRest = `${rest.slice(0,3)} ${rest.slice(3,6)} ${rest.slice(6)}`;
+    return cc ? `+${cc}${formattedRest ? ' ' + formattedRest : ''}` : `+${formattedRest}`;
+  }
+
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0,3)} ${digits.slice(3)}`;
+  return `${digits.slice(0,3)} ${digits.slice(3,6)} ${digits.slice(6,10)}`;
 }
 
 function renderSectionError(message) {
@@ -351,6 +425,81 @@ function notify(message, type = 'success') {
   setTimeout(() => {
     notice.style.display = 'none';
   }, 3500);
+}
+
+function clearFieldErrors(form) {
+  if (!form) return;
+  form.querySelectorAll('.field-error').forEach(el => el.remove());
+  form.querySelectorAll('.input-error').forEach(el => el.classList.remove('input-error'));
+}
+
+function setFieldError(input, message) {
+  if (!input) return;
+  input.classList.add('input-error');
+  const err = document.createElement('div');
+  err.className = 'field-error';
+  err.textContent = message;
+  if (input.nextSibling) {
+    input.parentNode.insertBefore(err, input.nextSibling);
+  } else {
+    input.parentNode.appendChild(err);
+  }
+}
+
+function isValidEmail(email) {
+  if (!email) return true;
+  // simple email regex
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+}
+
+function normalizePhone(value) {
+  if (!value) return '';
+  // keep leading + then digits, otherwise keep digits
+  const trimmed = String(value).trim();
+  const hasPlus = trimmed.startsWith('+');
+  const digits = trimmed.replace(/[^0-9]/g, '');
+  return hasPlus ? `+${digits}` : digits;
+}
+
+function validateCustomerForm(form) {
+  const errors = [];
+  const data = Object.fromEntries(new FormData(form).entries());
+
+  clearFieldErrors(form);
+
+  const nameInput = form.querySelector('[name="name"]');
+  if (!data.name || !String(data.name).trim()) {
+    setFieldError(nameInput, 'Name is required.');
+    errors.push('name');
+  }
+
+  const emailInput = form.querySelector('[name="email"]');
+  if (data.email && !isValidEmail(data.email)) {
+    setFieldError(emailInput, 'Invalid email address.');
+    errors.push('email');
+  }
+
+  const phoneInput = form.querySelector('[name="phone"]');
+  if (data.phone && String(data.phone).replace(/[^0-9+]/g, '').length < 7) {
+    setFieldError(phoneInput, 'Please enter a valid phone number.');
+    errors.push('phone');
+  }
+
+  // basic date sanity (YYYY-MM-DD) — accept empty
+  const dateFields = ['birthday', 'anniversary'];
+  for (const field of dateFields) {
+    const input = form.querySelector(`[name="${field}"]`);
+    const val = data[field];
+    if (val) {
+      const ts = Date.parse(val);
+      if (Number.isNaN(ts)) {
+        setFieldError(input, 'Invalid date format.');
+        errors.push(field);
+      }
+    }
+  }
+
+  return { ok: errors.length === 0, data };
 }
 
 function renderApp() {
@@ -421,6 +570,10 @@ function renderDashboardShell() {
             <span class="nav-icon">💰</span>
             <span>Sales</span>
           </a>
+          <a href="#/customers" data-route="customers" class="nav-item">
+            <span class="nav-icon">👥</span>
+            <span>Customers</span>
+          </a>
           <a href="#/whatsapp" data-route="whatsapp" class="nav-item">
             <span class="nav-icon">💬</span>
             <span>WhatsApp</span>
@@ -475,6 +628,7 @@ async function navigateDashboard(route) {
   const content = document.getElementById('content');
   if (!content) return;
 
+  const routeInfo = getCurrentRoute();
   setActiveRoute(route);
   content.innerHTML = '<div class="panel"><p>Loading...</p></div>';
 
@@ -484,6 +638,12 @@ async function navigateDashboard(route) {
     await renderInventory();
   } else if (route === 'sales') {
     await renderSales();
+  } else if (route === 'customers') {
+    if (routeInfo.id) {
+      await renderCustomerDetail(routeInfo.id);
+    } else {
+      await renderCustomers();
+    }
   } else if (route === 'whatsapp') {
     renderWhatsApp();
   } else if (route === 'subscriptions') {
@@ -731,8 +891,11 @@ async function renderInvoices() {
                 <select id="invoiceCustomerSelect" class="form-control">
                   <option value="">+ New Customer</option>
                   ${customers.map(customer => `
-                    <option value="${customer.id}" data-phone="${escapeHtml(customer.phone || '')}">
-                      ${escapeHtml(customer.name)}${customer.phone ? ` — ${escapeHtml(customer.phone)}` : ''}
+                    <option value="${customer.id}"
+                      data-phone="${escapeHtml(customer.phone || '')}"
+                      data-email="${escapeHtml(customer.email || '')}"
+                      data-delivery-address="${escapeHtml(customer.delivery_address || '')}">
+                      ${escapeHtml(customer.name)}${customer.phone ? ` — ${escapeHtml(customer.phone)}` : ''}${customer.email ? ` — ${escapeHtml(customer.email)}` : ''}
                     </option>
                   `).join('')}
                 </select>
@@ -746,6 +909,16 @@ async function renderInvoices() {
               <div class="form-group">
                 <label for="invoicePhone">Phone Number</label>
                 <input id="invoicePhone" name="customer_phone" type="tel" placeholder="+234...">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="invoiceEmail">Email Address</label>
+                <input id="invoiceEmail" name="customer_email" type="email" placeholder="customer@example.com">
+              </div>
+              <div class="form-group">
+                <label for="invoiceDeliveryAddress">Delivery Address</label>
+                <input id="invoiceDeliveryAddress" name="delivery_address" placeholder="Delivery / shipping address">
               </div>
             </div>
           </div>
@@ -830,6 +1003,8 @@ async function renderInvoices() {
   const invoiceCustomerSelect = document.getElementById('invoiceCustomerSelect');
   const invoiceCustomer = document.getElementById('invoiceCustomer');
   const invoicePhone = document.getElementById('invoicePhone');
+  const invoiceEmail = document.getElementById('invoiceEmail');
+  const invoiceDeliveryAddress = document.getElementById('invoiceDeliveryAddress');
   const invoiceAmount = document.getElementById('invoiceAmount');
   const invoiceItemsContainer = document.getElementById('invoiceItemsContainer');
   const invoiceForm = document.getElementById('invoiceForm');
@@ -881,11 +1056,15 @@ async function renderInvoices() {
       document.getElementById('invoiceCustomerId').value = '';
       invoiceCustomer.value = '';
       invoicePhone.value = '';
+      invoiceEmail.value = '';
+      invoiceDeliveryAddress.value = '';
       return;
     }
     document.getElementById('invoiceCustomerId').value = selected.value;
     invoiceCustomer.value = selected.textContent.split(' — ')[0].trim();
     invoicePhone.value = selected.dataset.phone || '';
+    invoiceEmail.value = selected.dataset.email || '';
+    invoiceDeliveryAddress.value = selected.dataset.deliveryAddress || '';
   });
 
   document.getElementById('addInvoiceItem').addEventListener('click', () => {
@@ -926,6 +1105,8 @@ async function renderInvoices() {
     invoiceCustomerSelect.value = invoice.customer_id || '';
     invoiceCustomer.value = invoice.customer_name || '';
     invoicePhone.value = invoice.customer_phone || '';
+    invoiceEmail.value = invoice.customer_email || '';
+    invoiceDeliveryAddress.value = invoice.delivery_address || '';
     invoiceAmount.value = invoice.amount || 0;
     document.getElementById('invoiceDueDate').value = invoice.due_date || '';
     document.getElementById('invoiceStatus').value = invoice.status || 'draft';
@@ -943,6 +1124,8 @@ async function renderInvoices() {
     invoiceCustomerSelect.value = '';
     invoiceCustomer.value = '';
     invoicePhone.value = '';
+    invoiceEmail.value = '';
+    invoiceDeliveryAddress.value = '';
     invoiceAmount.value = '0.00';
     document.getElementById('invoiceDueDate').value = '';
     document.getElementById('invoiceStatus').value = 'draft';
@@ -969,6 +1152,8 @@ async function renderInvoices() {
       customer_id: rawData.customer_id || null,
       customer_name: rawData.customer_name,
       customer_phone: rawData.customer_phone,
+      customer_email: rawData.customer_email || null,
+      delivery_address: rawData.delivery_address || null,
       amount: Number(rawData.amount || 0),
       due_date: rawData.due_date || null,
       status: rawData.status || 'draft',
@@ -1165,6 +1350,616 @@ function createInvoiceItemRow(index, inventory, item = {}) {
   `;
 }
 
+async function renderCustomers() {
+  const [customersRes, analyticsRes] = await Promise.all([
+    API.business.customers(),
+    API.business.customersAnalytics(),
+  ]);
+
+  const customers = getResponseData(customersRes);
+  const analytics = getResponseData(analyticsRes, {});
+
+  const errors = [
+    getResponseError(customersRes, 'Customers could not be loaded.'),
+    getResponseError(analyticsRes, 'Customer analytics could not be loaded.'),
+  ].filter(Boolean);
+
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Customers</h2>
+          <p>Manage customer profiles, track customer purchases, and uncover loyalty insights.</p>
+        </div>
+      </div>
+      ${errors.length ? renderSectionError(errors.join(' ')) : ''}
+
+      <div class="overview-grid customer-overview-grid">
+        <div class="overview-card">
+          <h4>Total Customers</h4>
+          <p>${analytics.total_customers ?? 0}</p>
+        </div>
+        <div class="overview-card">
+          <h4>Invoices Paid</h4>
+          <p>${analytics.paid_invoices ?? 0}</p>
+        </div>
+        <div class="overview-card">
+          <h4>Pending Invoices</h4>
+          <p>${analytics.pending_invoices ?? 0}</p>
+        </div>
+        <div class="overview-card">
+          <h4>Total Revenue</h4>
+          <p>${formatMoney(analytics.total_revenue)}</p>
+        </div>
+        <div class="overview-card">
+          <h4>Total Profit</h4>
+          <p>${formatMoney(analytics.total_profit)}</p>
+        </div>
+        <div class="overview-card">
+          <h4>Top Product</h4>
+          <p>${escapeHtml(analytics.top_product || '-')}</p>
+        </div>
+      </div>
+
+      <div class="panel-section customer-actions">
+        <div class="section-header">
+          <h3>Create New Customer</h3>
+        </div>
+        <form id="customerForm" class="form-grid customer-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="customerName">Customer Name *</label>
+              <input id="customerName" name="name" type="text" required placeholder="Full name">
+            </div>
+            <div class="form-group">
+              <label for="customerPhone">Phone</label>
+              <input id="customerPhone" name="phone" type="tel" placeholder="+234...">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="customerEmail">Email</label>
+              <input id="customerEmail" name="email" type="email" placeholder="customer@example.com">
+            </div>
+            <div class="form-group">
+              <label for="customerCity">City</label>
+              <input id="customerCity" name="city" placeholder="City">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="customerRegion">Region</label>
+              <input id="customerRegion" name="region" placeholder="State / region">
+            </div>
+            <div class="form-group">
+              <label for="customerDeliveryAddress">Delivery Address</label>
+              <input id="customerDeliveryAddress" name="delivery_address" placeholder="Street, area, landmark">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="customerBirthday">Birthday</label>
+              <input id="customerBirthday" name="birthday" type="date">
+            </div>
+            <div class="form-group">
+              <label for="customerAnniversary">Anniversary</label>
+              <input id="customerAnniversary" name="anniversary" type="date">
+            </div>
+          </div>
+          <div class="form-row checkbox-row">
+            <div class="form-group checkbox-group">
+              <label>
+                <input id="customerAutoBirthday" name="auto_birthday" type="checkbox">
+                <span>Auto birthday messages</span>
+              </label>
+            </div>
+            <div class="form-group checkbox-group">
+              <label>
+                <input id="customerAutoAnniversary" name="auto_anniversary" type="checkbox">
+                <span>Auto anniversary messages</span>
+              </label>
+            </div>
+          </div>
+          <div class="invoice-section">
+            <button type="submit" class="btn-primary btn-lg form-action">Create Customer</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel-section customer-list-section">
+        <div class="section-header customer-list-header">
+          <div>
+            <h3>Customer Directory</h3>
+            <p>Filter customers by name, city, region, or invoice status.</p>
+          </div>
+          <div class="customer-filters">
+            <input id="customerSearch" type="search" placeholder="Search name, email, or phone">
+            <select id="customerCityFilter">
+              <option value="">All cities</option>
+              ${[...new Set(customers.filter(c => c.city).map(c => c.city))].sort().map(city => `
+                <option value="${escapeHtml(city)}">${escapeHtml(city)}</option>
+              `).join('')}
+            </select>
+            <select id="customerRegionFilter">
+              <option value="">All regions</option>
+              ${[...new Set(customers.filter(c => c.region).map(c => c.region))].sort().map(region => `
+                <option value="${escapeHtml(region)}">${escapeHtml(region)}</option>
+              `).join('')}
+            </select>
+            <select id="customerStatusFilter">
+              <option value="">All statuses</option>
+              <option value="paid">Paid</option>
+              <option value="pending">Pending</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table customer-list-table">
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>Contact</th>
+                <th>Location</th>
+                <th>Revenue</th>
+                <th>Profit</th>
+                <th>Invoices</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="customerTableBody">
+              ${customers.map(customer => {
+                const status = customer.pending_invoices ? 'pending' : 'paid';
+                return `
+                  <tr>
+                    <td><a class="customer-link" href="#/customers/${customer.id}">${escapeHtml(customer.name)}</a></td>
+                    <td>${escapeHtml(customer.email || customer.phone || '-')}</td>
+                    <td>${escapeHtml(customer.city || '-')}, ${escapeHtml(customer.region || '-')}</td>
+                    <td>${formatMoney(customer.total_spent)}</td>
+                    <td>${formatMoney(customer.total_profit)}</td>
+                    <td>${customer.invoice_count || 0}</td>
+                    <td><span class="status-pill ${status}">${status === 'pending' ? `${customer.pending_invoices} pending` : 'Paid'}</span></td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel-section customer-grouping">
+        <div class="section-header">
+          <h3>Region & City Groups</h3>
+        </div>
+        <div class="overview-grid">
+          ${analytics.top_regions?.map(region => `
+            <div class="overview-card">
+              <h4>${escapeHtml(region.region || 'Unknown')}</h4>
+              <p>${region.customers} customers</p>
+              <p>${formatMoney(region.revenue)}</p>
+            </div>
+          `).join('')}
+          ${analytics.top_cities?.map(city => `
+            <div class="overview-card">
+              <h4>${escapeHtml(city.city || 'Unknown')}</h4>
+              <p>${city.customers} customers</p>
+              <p>${formatMoney(city.revenue)}</p>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="panel-section customer-events">
+        <div class="section-header">
+          <h3>Upcoming Milestones</h3>
+        </div>
+        <div class="overview-grid">
+          <div class="overview-card">
+            <h4>Birthdays</h4>
+            <ul class="event-list">
+              ${analytics.upcoming_birthdays?.length ? analytics.upcoming_birthdays.map(customer => `
+                <li>${escapeHtml(customer.name)} — ${formatDate(customer.birthday)}</li>
+              `).join('') : '<li>No upcoming birthdays</li>'}
+            </ul>
+          </div>
+          <div class="overview-card">
+            <h4>Anniversaries</h4>
+            <ul class="event-list">
+              ${analytics.upcoming_anniversaries?.length ? analytics.upcoming_anniversaries.map(customer => `
+                <li>${escapeHtml(customer.name)} — ${formatDate(customer.anniversary)}</li>
+              `).join('') : '<li>No upcoming anniversaries</li>'}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('customerForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.target);
+    const payload = Object.fromEntries(formData.entries());
+    payload.auto_birthday = document.getElementById('customerAutoBirthday').checked;
+    payload.auto_anniversary = document.getElementById('customerAutoAnniversary').checked;
+    const response = await API.business.createCustomer(payload);
+    const customer = getResponseData(response, null);
+    if (customer) {
+      notify('Customer created successfully.');
+      await renderCustomers();
+    } else {
+      notify(response?.message || 'Unable to create customer.', 'error');
+    }
+  });
+
+  const searchInput = document.getElementById('customerSearch');
+  const cityFilter = document.getElementById('customerCityFilter');
+  const regionFilter = document.getElementById('customerRegionFilter');
+  const statusFilter = document.getElementById('customerStatusFilter');
+  const customerTableBody = document.getElementById('customerTableBody');
+
+  const filterCustomers = () => {
+    const searchValue = searchInput?.value.trim().toLowerCase() || '';
+    const cityValue = cityFilter?.value || '';
+    const regionValue = regionFilter?.value || '';
+    const statusValue = statusFilter?.value || '';
+
+    return customers.filter(customer => {
+      const text = `${customer.name || ''} ${customer.email || ''} ${customer.phone || ''}`.toLowerCase();
+      const matchesSearch = !searchValue || text.includes(searchValue);
+      const matchesCity = !cityValue || (customer.city || '').toLowerCase() === cityValue.toLowerCase();
+      const matchesRegion = !regionValue || (customer.region || '').toLowerCase() === regionValue.toLowerCase();
+      const matchesStatus = !statusValue || (statusValue === 'pending' ? customer.pending_invoices > 0 : customer.pending_invoices === 0);
+      return matchesSearch && matchesCity && matchesRegion && matchesStatus;
+    });
+  };
+
+  const renderCustomerTable = (items) => {
+    if (!customerTableBody) return;
+
+    if (!items.length) {
+      customerTableBody.innerHTML = `
+        <tr class="empty-row">
+          <td colspan="7">No customers match the filter criteria.</td>
+        </tr>
+      `;
+      return;
+    }
+
+    customerTableBody.innerHTML = items.map(customer => {
+      const status = customer.pending_invoices ? 'pending' : 'paid';
+      return `
+        <tr>
+          <td><a class="customer-link" href="#/customers/${customer.id}">${escapeHtml(customer.name)}</a></td>
+          <td>${escapeHtml(customer.email || customer.phone || '-')}</td>
+          <td>${escapeHtml(customer.city || '-')}, ${escapeHtml(customer.region || '-')}</td>
+          <td>${formatMoney(customer.total_spent)}</td>
+          <td>${formatMoney(customer.total_profit)}</td>
+          <td>${customer.invoice_count || 0}</td>
+          <td><span class="status-pill ${status}">${status === 'pending' ? `${customer.pending_invoices} pending` : 'Paid'}</span></td>
+        </tr>
+      `;
+    }).join('');
+  };
+
+  const updateCustomerList = () => renderCustomerTable(filterCustomers());
+
+  [searchInput, cityFilter, regionFilter, statusFilter].forEach((input) => {
+    if (!input) return;
+    input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', updateCustomerList);
+  });
+
+  updateCustomerList();
+}
+
+async function renderCustomerDetail(customerId) {
+  const response = await API.business.customer(customerId);
+  const customer = getResponseData(response, null);
+  const error = getResponseError(response, 'Customer could not be loaded.');
+
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Customer Detail</h2>
+          <p>View customer profile information, purchase history, and invoice status.</p>
+        </div>
+        <div class="header-actions">
+          <button id="backToCustomers" class="btn-secondary">Back to Customers</button>
+          <button id="toggleEditCustomer" class="btn-primary">Edit</button>
+        </div>
+      </div>
+      ${error ? renderSectionError(error) : ''}
+      ${customer ? `
+        <div class="customer-detail-grid">
+          <div id="customerView" class="detail-card">
+            <h3>${escapeHtml(customer.name)}</h3>
+            <p>${escapeHtml(customer.email || customer.phone || 'No contact details')}</p>
+            <p>${escapeHtml(customer.delivery_address || 'No delivery address')}</p>
+            <p>${escapeHtml(customer.city || '-')}, ${escapeHtml(customer.region || '-')}</p>
+            <p>Birthday: ${customer.birthday ? formatDate(customer.birthday) : '-'}</p>
+            <p>Anniversary: ${customer.anniversary ? formatDate(customer.anniversary) : '-'}</p>
+            <p>Auto birthday messages: ${customer.auto_birthday ? 'Enabled' : 'Disabled'}</p>
+            <p>Auto anniversary messages: ${customer.auto_anniversary ? 'Enabled' : 'Disabled'}</p>
+          </div>
+          <form id="customerDetailForm" class="detail-form" style="display:none">
+            <div class="detail-card">
+              <h3>Edit Customer</h3>
+              <div class="form-group">
+                <label for="detailCustomerName">Name</label>
+                <input id="detailCustomerName" name="name" type="text" required value="${escapeHtml(customer.name)}">
+              </div>
+              <div class="form-group">
+                <label for="detailCustomerPhone">Phone</label>
+                <input id="detailCustomerPhone" name="phone" type="tel" value="${escapeHtml(customer.phone || '')}">
+              </div>
+              <div class="form-group">
+                <label for="detailCustomerEmail">Email</label>
+                <input id="detailCustomerEmail" name="email" type="email" value="${escapeHtml(customer.email || '')}">
+              </div>
+              <div class="form-group">
+                <label for="detailCustomerCity">City</label>
+                <input id="detailCustomerCity" name="city" value="${escapeHtml(customer.city || '')}">
+              </div>
+              <div class="form-group">
+                <label for="detailCustomerRegion">Region</label>
+                <input id="detailCustomerRegion" name="region" value="${escapeHtml(customer.region || '')}">
+              </div>
+              <div class="form-group">
+                <label for="detailCustomerDeliveryAddress">Delivery Address</label>
+                <input id="detailCustomerDeliveryAddress" name="delivery_address" value="${escapeHtml(customer.delivery_address || '')}">
+              </div>
+              <div class="form-group">
+                <label for="detailCustomerBirthday">Birthday</label>
+                <input id="detailCustomerBirthday" name="birthday" type="date" value="${escapeHtml(customer.birthday || '')}">
+              </div>
+              <div class="form-group">
+                <label for="detailCustomerAnniversary">Anniversary</label>
+                <input id="detailCustomerAnniversary" name="anniversary" type="date" value="${escapeHtml(customer.anniversary || '')}">
+              </div>
+              <div class="form-row checkbox-row">
+                <div class="form-group checkbox-group">
+                  <label>
+                    <input id="detailCustomerAutoBirthday" name="auto_birthday" type="checkbox" ${customer.auto_birthday ? 'checked' : ''}>
+                    <span>Auto birthday messages</span>
+                  </label>
+                </div>
+                <div class="form-group checkbox-group">
+                  <label>
+                    <input id="detailCustomerAutoAnniversary" name="auto_anniversary" type="checkbox" ${customer.auto_anniversary ? 'checked' : ''}>
+                    <span>Auto anniversary messages</span>
+                  </label>
+                </div>
+              </div>
+              <div class="invoice-section">
+                <button type="submit" class="btn-primary btn-lg">Save Changes</button>
+                <button type="button" id="cancelCustomerEdit" class="btn-secondary btn-lg">Cancel</button>
+              </div>
+            </div>
+            <div class="detail-card">
+              <h3>Purchase Summary</h3>
+              <div class="overview-grid">
+                <div class="overview-card">
+                  <h4>Total Invoices</h4>
+                  <p>${customer.invoice_count || 0}</p>
+                </div>
+                <div class="overview-card">
+                  <h4>Paid</h4>
+                  <p>${customer.paid_invoices || 0}</p>
+                </div>
+                <div class="overview-card">
+                  <h4>Pending</h4>
+                  <p>${customer.pending_invoices || 0}</p>
+                </div>
+                <div class="overview-card">
+                  <h4>Revenue</h4>
+                  <p>${formatMoney(customer.total_spent)}</p>
+                </div>
+                <div class="overview-card">
+                  <h4>Profit</h4>
+                  <p>${formatMoney(customer.total_profit)}</p>
+                </div>
+              </div>
+            </div>
+          </form>
+        <div class="table-wrap">
+          <h3 class="section-title">Invoice History</h3>
+          <table class="data-table customer-list-table">
+            <thead>
+              <tr>
+                <th>Invoice #</th>
+                <th>Status</th>
+                <th>Amount</th>
+                <th>Due Date</th>
+                <th>Paid Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${customer.invoices?.length ? customer.invoices.map(invoice => `
+                <tr>
+                  <td><a class="customer-link" href="#/invoices/${invoice.id}">#${invoice.id}</a></td>
+                  <td><span class="status-pill ${invoice.status === 'paid' ? 'paid' : 'pending'}">${capitalize(invoice.status)}</span></td>
+                  <td>${formatMoney(invoice.amount)}</td>
+                  <td>${invoice.due_date ? formatDate(invoice.due_date) : '-'}</td>
+                  <td>${invoice.paid_date ? formatDate(invoice.paid_date) : '-'}</td>
+                </tr>
+              `).join('') : `
+                <tr class="empty-row">
+                  <td colspan="5">No invoices found for this customer.</td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+    </div>
+  `;
+
+  document.getElementById('customerDetailForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Saving...');
+    showEditSpinner(true);
+    const formData = new FormData(event.currentTarget);
+    const payload = Object.fromEntries(formData.entries());
+    payload.auto_birthday = document.getElementById('detailCustomerAutoBirthday').checked;
+    payload.auto_anniversary = document.getElementById('detailCustomerAutoAnniversary').checked;
+    // Optimistic UI update: apply changes immediately to the view
+    const prevState = { ...customer };
+    const optimisticCustomer = Object.assign({}, customer, {
+      ...payload,
+      auto_birthday: !!payload.auto_birthday,
+      auto_anniversary: !!payload.auto_anniversary,
+    });
+
+    const viewEl = document.getElementById('customerView');
+    const renderView = (c) => {
+      if (!viewEl) return;
+      viewEl.innerHTML = `
+        <h3>${escapeHtml(c.name)}</h3>
+        <p>${escapeHtml(c.email || c.phone || 'No contact details')}</p>
+        <p>${escapeHtml(c.delivery_address || 'No delivery address')}</p>
+        <p>${escapeHtml(c.city || '-')}, ${escapeHtml(c.region || '-')}</p>
+        <p>Birthday: ${c.birthday ? formatDate(c.birthday) : '-'}</p>
+        <p>Anniversary: ${c.anniversary ? formatDate(c.anniversary) : '-'}</p>
+        <p>Auto birthday messages: ${c.auto_birthday ? 'Enabled' : 'Disabled'}</p>
+        <p>Auto anniversary messages: ${c.auto_anniversary ? 'Enabled' : 'Disabled'}</p>
+      `;
+    };
+
+    // apply optimistic render
+    renderView(optimisticCustomer);
+
+    // send update to server
+    const updateResponse = await API.business.updateCustomer(customerId, payload);
+    showEditSpinner(false);
+    const updatedCustomer = getResponseData(updateResponse, null);
+    if (updatedCustomer) {
+      notify('Customer updated successfully.');
+      // refresh from server to ensure consistency
+      await renderCustomerDetail(customerId);
+    } else {
+      // rollback optimistic update
+      notify(updateResponse?.message || 'Unable to update customer.', 'error');
+      renderView(prevState);
+      setButtonLoading(submitButton, false);
+    }
+  });
+
+  document.getElementById('cancelCustomerEdit')?.addEventListener('click', () => {
+    renderCustomerDetail(customerId);
+  });
+
+  // Toggle view/edit modes
+  const toggleBtn = document.getElementById('toggleEditCustomer');
+  const viewEl = document.getElementById('customerView');
+  const formEl = document.getElementById('customerDetailForm');
+
+  const showView = () => {
+    if (viewEl) viewEl.style.display = '';
+    if (formEl) formEl.style.display = 'none';
+    if (toggleBtn) toggleBtn.textContent = 'Edit';
+  };
+
+  const showEdit = () => {
+    if (viewEl) viewEl.style.display = 'none';
+    if (formEl) formEl.style.display = '';
+    if (toggleBtn) toggleBtn.textContent = 'View';
+  };
+
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      if (formEl && formEl.style.display === 'none') {
+        showEdit();
+      } else {
+        showView();
+      }
+    });
+  }
+
+  // Start in view mode
+  showView();
+
+  // Live per-field validation while typing or on blur
+  (function setupLiveValidation() {
+    const form = document.getElementById('customerDetailForm');
+    if (!form) return;
+
+    const validateField = (input) => {
+      if (!input) return;
+      const name = input.name;
+      // clear previous error for this field
+      const prev = input.parentNode.querySelector('.field-error');
+      if (prev) prev.remove();
+      input.classList.remove('input-error');
+      input.classList.remove('input-valid');
+      const icon = input.parentNode.querySelector('.validation-icon');
+      if (icon) {
+        icon.classList.remove('show', 'valid', 'invalid');
+      }
+
+      const val = input.value;
+      let fieldValid = true;
+      if (name === 'name') {
+        if (!val || !String(val).trim()) { setFieldError(input, 'Name is required.'); fieldValid = false; }
+      } else if (name === 'email') {
+        if (val && !isValidEmail(val)) { setFieldError(input, 'Invalid email address.'); fieldValid = false; }
+      } else if (name === 'phone') {
+        if (val && String(val).replace(/[^0-9+]/g, '').length < 7) { setFieldError(input, 'Please enter a valid phone number.'); fieldValid = false; }
+      } else if (name === 'birthday' || name === 'anniversary') {
+        if (val) {
+          const ts = Date.parse(val);
+          if (Number.isNaN(ts)) { setFieldError(input, 'Invalid date format.'); fieldValid = false; }
+        }
+      }
+
+      if (fieldValid) {
+        input.classList.add('input-valid');
+        if (icon) {
+          icon.classList.add('show', 'valid');
+        }
+      } else {
+        if (icon) icon.classList.add('show', 'invalid');
+      }
+    };
+
+    const fields = ['name', 'email', 'phone', 'birthday', 'anniversary'];
+    fields.forEach((fieldName) => {
+      const input = form.querySelector(`[name="${fieldName}"]`);
+      if (!input) return;
+      const eventType = fieldName === 'email' ? 'blur' : 'input';
+      input.addEventListener(eventType, () => validateField(input));
+      // also validate on change for date pickers
+      input.addEventListener('change', () => validateField(input));
+      // validate on paste and normalize phone
+      input.addEventListener('paste', (ev) => {
+        if (fieldName === 'phone') {
+          const pasted = ev.clipboardData?.getData('text') || '';
+          const cleaned = normalizePhone(pasted);
+          ev.preventDefault();
+          // insert normalized phone
+          const start = input.selectionStart || 0;
+          const end = input.selectionEnd || 0;
+          const newVal = input.value.slice(0, start) + cleaned + input.value.slice(end);
+          input.value = newVal;
+          validateField(input);
+        }
+      });
+
+      // live phone formatting while typing
+      if (fieldName === 'phone') {
+        input.addEventListener('input', () => {
+          const formatted = formatPhoneAsYouType(input.value || '');
+          input.value = formatted;
+          validateField(input);
+        });
+      }
+    });
+  })();
+
+  document.getElementById('backToCustomers')?.addEventListener('click', () => {
+    window.location.hash = '#/customers';
+  });
+}
+
 async function renderInventory() {
   const response = await API.business.inventory();
   const items = getResponseData(response);
@@ -1210,55 +2005,67 @@ async function renderInventory() {
     </div>
   `;
 
-  document.getElementById('inventoryForm').addEventListener('submit', async (event) => {
+  document.getElementById('customerDetailForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
-    setButtonLoading(submitButton, true, 'Adding...');
-    const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
-    const result = await API.business.createInventoryItem(formData);
-    if (result?.success) {
-      notify('Inventory item added.');
-      await renderInventory();
+    const form = event.currentTarget;
+
+    clearFieldErrors(form);
+    const validation = validateCustomerForm(form);
+    if (!validation.ok) {
+      notify('Please fix the highlighted fields.', 'error');
+      const firstError = form.querySelector('.input-error');
+      if (firstError) firstError.focus();
+      return;
+    }
+
+    const submitButton = form.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Saving...');
+    showEditSpinner(true);
+    const payload = validation.data;
+    payload.auto_birthday = document.getElementById('detailCustomerAutoBirthday').checked;
+    payload.auto_anniversary = document.getElementById('detailCustomerAutoAnniversary').checked;
+
+    // Optimistic UI update: apply changes immediately to the view
+    const prevState = { ...customer };
+    const optimisticCustomer = Object.assign({}, customer, {
+      ...payload,
+      auto_birthday: !!payload.auto_birthday,
+      auto_anniversary: !!payload.auto_anniversary,
+    });
+
+    const viewEl = document.getElementById('customerView');
+    const renderView = (c) => {
+      if (!viewEl) return;
+      viewEl.innerHTML = `
+        <h3>${escapeHtml(c.name)}</h3>
+        <p>${escapeHtml(c.email || c.phone || 'No contact details')}</p>
+        <p>${escapeHtml(c.delivery_address || 'No delivery address')}</p>
+        <p>${escapeHtml(c.city || '-')}, ${escapeHtml(c.region || '-')}</p>
+        <p>Birthday: ${c.birthday ? formatDate(c.birthday) : '-'}</p>
+        <p>Anniversary: ${c.anniversary ? formatDate(c.anniversary) : '-'}</p>
+        <p>Auto birthday messages: ${c.auto_birthday ? 'Enabled' : 'Disabled'}</p>
+        <p>Auto anniversary messages: ${c.auto_anniversary ? 'Enabled' : 'Disabled'}</p>
+      `;
+    };
+
+    // apply optimistic render
+    renderView(optimisticCustomer);
+
+    // send update to server
+    const updateResponse = await API.business.updateCustomer(customerId, payload);
+    showEditSpinner(false);
+    const updatedCustomer = getResponseData(updateResponse, null);
+    if (updatedCustomer) {
+      notify('Customer updated successfully.');
+      // refresh from server to ensure consistency
+      await renderCustomerDetail(customerId);
     } else {
-      notify(result?.message || 'Unable to add inventory item.', 'error');
+      // rollback optimistic update
+      notify(updateResponse?.message || 'Unable to update customer.', 'error');
+      renderView(prevState);
       setButtonLoading(submitButton, false);
     }
   });
-}
-
-function renderInventoryTable(items) {
-  if (!items.length) {
-    return '<div class="empty-state">No inventory items yet.</div>';
-  }
-
-  return `
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Product</th>
-            <th>Quantity</th>
-            <th>Unit Price</th>
-            <th>Cost Price</th>
-            <th>Reorder</th>
-            <th>Supplier</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map(item => `
-            <tr>
-              <td>${escapeHtml(item.product_name || '-')}</td>
-              <td>${Number(item.quantity || 0)}</td>
-              <td>${formatMoney(item.unit_price)}</td>
-              <td>${formatMoney(item.cost_price)}</td>
-              <td>${Number(item.reorder_level || 0)}</td>
-              <td>${escapeHtml(item.supplier || '-')}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
 }
 
 async function renderSales() {
