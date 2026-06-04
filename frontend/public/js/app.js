@@ -239,6 +239,81 @@ function formatDate(value) {
   return value ? new Date(value).toLocaleDateString() : '-';
 }
 
+function normalizePhoneNumber(phone = '') {
+  return String(phone || '').replace(/[^+0-9]/g, '');
+}
+
+function buildInvoiceReceiptText(invoice) {
+  const lines = [];
+  lines.push(`Invoice #${invoice.id}`);
+  lines.push(`Customer: ${invoice.customer_name || 'N/A'}`);
+  if (invoice.customer_phone) lines.push(`Phone: ${invoice.customer_phone}`);
+  if (invoice.customer_email) lines.push(`Email: ${invoice.customer_email}`);
+  if (invoice.due_date) lines.push(`Due Date: ${formatDate(invoice.due_date)}`);
+  if (invoice.description) lines.push(`Description: ${invoice.description}`);
+  lines.push('');
+  lines.push('Items:');
+
+  const items = Array.isArray(invoice.invoice_items) ? invoice.invoice_items : [];
+  if (items.length) {
+    items.forEach((item, index) => {
+      const name = item.product_name || item.inventory_name || `Item ${index + 1}`;
+      const quantity = Number(item.quantity || 0);
+      const unitPrice = Number(item.unit_price || 0);
+      const totalPrice = Number(item.total_price || quantity * unitPrice);
+      lines.push(`${index + 1}. ${name} — ${quantity} x ${formatMoney(unitPrice)} = ${formatMoney(totalPrice)}`);
+    });
+  } else {
+    lines.push('No line items available.');
+  }
+
+  lines.push('');
+  lines.push(`Total: ${formatMoney(invoice.amount)}`);
+  lines.push('');
+  lines.push('Thank you for your business.');
+
+  return lines.join('\n');
+}
+
+function createMailtoLink(to, subject, body) {
+  const params = new URLSearchParams();
+  if (subject) params.set('subject', subject);
+  if (body) params.set('body', body);
+  return `mailto:${encodeURIComponent(to || '')}?${params.toString()}`;
+}
+
+function createWhatsAppLink(phone, body) {
+  const normalizedPhone = normalizePhoneNumber(phone);
+  const text = encodeURIComponent(body || '');
+  if (normalizedPhone) {
+    return `https://wa.me/${normalizedPhone.replace(/^\+/, '')}?text=${text}`;
+  }
+  return `https://api.whatsapp.com/send?text=${text}`;
+}
+
+function openInvoiceEmailCompose(invoice) {
+  if (!invoice.customer_email) {
+    return false;
+  }
+
+  const subject = `Invoice #${invoice.id} from ${window.SABIBIZ_APP_NAME || 'SabiBiz'}`;
+  const body = buildInvoiceReceiptText(invoice);
+  const mailto = createMailtoLink(invoice.customer_email, subject, body);
+  window.location.href = mailto;
+  return true;
+}
+
+function openInvoiceWhatsAppCompose(invoice) {
+  if (!invoice.customer_phone) {
+    return false;
+  }
+
+  const body = buildInvoiceReceiptText(invoice);
+  const whatsappUrl = createWhatsAppLink(invoice.customer_phone, body);
+  window.open(whatsappUrl, '_blank');
+  return true;
+}
+
 function getResponseData(response, fallback = []) {
   if (!response?.success) return fallback;
   return response.data ?? fallback;
@@ -698,8 +773,8 @@ async function renderInvoices() {
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label for="invoiceDescription">Description / Notes</label>
-                <textarea id="invoiceDescription" name="description" placeholder="Add any notes..." rows="3"></textarea>
+                <label for="invoiceDescription">Product Summary</label>
+                <textarea id="invoiceDescription" name="description" placeholder="Product list and quantities will be generated here as you add items" rows="3"></textarea>
               </div>
             </div>
             <div class="form-row checkbox-row">
@@ -774,11 +849,25 @@ async function renderInvoices() {
     }
   };
 
+  const generateDescriptionFromItems = () => {
+    const rows = Array.from(invoiceItemsContainer.querySelectorAll('.invoice-item-row'));
+    const lines = rows
+      .map(row => {
+        const name = row.querySelector('[name="product_name"]').value.trim() || 'Unnamed product';
+        const quantity = Number(row.querySelector('[name="quantity"]').value || 0);
+        return quantity > 0 ? `${quantity} x ${name}` : null;
+      })
+      .filter(line => line);
+
+    return lines.length ? lines.join('\n') : '';
+  };
+
   const syncRowTotal = (row) => {
     const quantity = Number(row.querySelector('[name="quantity"]').value || 0);
     const unitPrice = Number(row.querySelector('[name="unit_price"]').value || 0);
     row.querySelector('[name="total_price"]').value = (quantity * unitPrice).toFixed(2);
     setTotalAmount();
+    document.getElementById('invoiceDescription').value = generateDescriptionFromItems();
   };
 
   const refreshInvoiceTotals = () => {
@@ -802,6 +891,7 @@ async function renderInvoices() {
   document.getElementById('addInvoiceItem').addEventListener('click', () => {
     const rowCount = invoiceItemsContainer.querySelectorAll('.invoice-item-row').length;
     invoiceItemsContainer.insertAdjacentHTML('beforeend', createInvoiceItemRow(rowCount, inventory));
+    document.getElementById('invoiceDescription').value = generateDescriptionFromItems();
   });
 
   invoiceItemsContainer.addEventListener('input', (event) => {
@@ -812,10 +902,10 @@ async function renderInvoices() {
       if (selected) {
         row.querySelector('[name="product_name"]').value = selected.dataset.name || row.querySelector('[name="product_name"]').value;
         row.querySelector('[name="unit_price"]').value = selected.dataset.unitPrice || '0';
-        row.querySelector('[name="cost_price"]').value = selected.dataset.costPrice || '0';
       }
+      syncRowTotal(row);
     }
-    if (event.target.matches('[name="quantity"], [name="unit_price"]')) {
+    if (event.target.matches('[name="quantity"], [name="unit_price"], [name="product_name"]')) {
       syncRowTotal(row);
     }
   });
@@ -827,6 +917,7 @@ async function renderInvoices() {
     const row = removeButton.closest('.invoice-item-row');
     row?.remove();
     refreshInvoiceTotals();
+    document.getElementById('invoiceDescription').value = generateDescriptionFromItems();
   });
 
   const populateInvoiceForm = (invoice) => {
@@ -838,7 +929,7 @@ async function renderInvoices() {
     invoiceAmount.value = invoice.amount || 0;
     document.getElementById('invoiceDueDate').value = invoice.due_date || '';
     document.getElementById('invoiceStatus').value = invoice.status || 'draft';
-    document.getElementById('invoiceDescription').value = invoice.description || '';
+    document.getElementById('invoiceDescription').value = invoice.items ? invoice.items.map(item => `${Number(item.quantity || 0)} x ${item.product_name || item.inventory_name || 'Unnamed product'}`).join('\n') : '';
     document.getElementById('invoiceAutoMail').checked = !!invoice.auto_mail;
     document.getElementById('invoiceAutoWhatsapp').checked = !!invoice.auto_whatsapp;
     invoiceItemsContainer.innerHTML = invoice.items.map((item, index) => createInvoiceItemRow(index, inventory, item)).join('');
@@ -869,10 +960,8 @@ async function renderInvoices() {
     const items = Array.from(invoiceItemsContainer.querySelectorAll('.invoice-item-row')).map(row => ({
       inventory_id: row.querySelector('[name="inventory_id"]').value || null,
       product_name: row.querySelector('[name="product_name"]').value.trim(),
-      unit: row.querySelector('[name="unit"]').value.trim(),
       quantity: Number(row.querySelector('[name="quantity"]').value || 0),
       unit_price: Number(row.querySelector('[name="unit_price"]').value || 0),
-      cost_price: Number(row.querySelector('[name="cost_price"]').value || 0),
       total_price: Number(row.querySelector('[name="total_price"]').value || 0),
     })).filter(item => item.product_name && item.quantity > 0);
 
@@ -923,13 +1012,25 @@ async function renderInvoices() {
     }
 
     if (button.dataset.action === 'whatsapp' || button.dataset.action === 'email') {
-      const method = button.dataset.action === 'whatsapp' ? 'whatsapp' : 'email';
-      const sendResponse = await API.business.sendInvoice(invoiceId, { method });
-      if (sendResponse?.success) {
-        notify(`Invoice sent via ${method}.`);
-      } else {
-        notify(sendResponse?.message || `Unable to send invoice via ${method}.`, 'error');
+      const response = await API.business.invoice(invoiceId);
+      const invoice = getResponseData(response, null);
+      if (!invoice) {
+        notify(response?.message || 'Unable to load invoice details.', 'error');
+        return;
       }
+
+      const isWhatsApp = button.dataset.action === 'whatsapp';
+      const opened = isWhatsApp
+        ? openInvoiceWhatsAppCompose(invoice)
+        : openInvoiceEmailCompose(invoice);
+
+      if (!opened) {
+        const missingField = isWhatsApp ? 'phone number' : 'email address';
+        notify(`Unable to ${button.dataset.action} invoice: customer ${missingField} is missing.`, 'error');
+        return;
+      }
+
+      notify(`Opening ${button.dataset.action} compose window...`);
       return;
     }
   });
@@ -952,6 +1053,12 @@ function renderInvoiceTable(invoices) {
               <div class="invoice-info">
                 <h4>${escapeHtml(invoice.customer_name || '-')}</h4>
                 <p class="invoice-id">Invoice #${invoice.id}</p>
+                ${( !invoice.customer_phone || !invoice.customer_email ) ? `
+                  <div class="invoice-badges">
+                    ${!invoice.customer_phone ? '<span class="contact-badge">Missing phone</span>' : ''}
+                    ${!invoice.customer_email ? '<span class="contact-badge">Missing email</span>' : ''}
+                  </div>
+                ` : ''}
               </div>
               <span class="status ${escapeHtml(invoice.status || 'draft')}">${escapeHtml(invoice.status || 'draft')}</span>
             </div>
@@ -971,8 +1078,8 @@ function renderInvoiceTable(invoices) {
             </div>
             <div class="invoice-card-actions">
               <button class="btn-link" data-action="edit" data-invoice-id="${invoice.id}">Edit</button>
-              <button class="btn-link" data-action="whatsapp" data-invoice-id="${invoice.id}">WhatsApp</button>
-              <button class="btn-link" data-action="email" data-invoice-id="${invoice.id}">Email</button>
+              <button class="btn-link" ${!invoice.customer_phone ? 'disabled title="Add customer phone to enable WhatsApp"' : ''} data-action="whatsapp" data-invoice-id="${invoice.id}">WhatsApp</button>
+              <button class="btn-link" ${!invoice.customer_email ? 'disabled title="Add customer email to enable Email"' : ''} data-action="email" data-invoice-id="${invoice.id}">Email</button>
             </div>
           </div>
         `).join('')}
@@ -1029,7 +1136,6 @@ function createInvoiceItemRow(index, inventory, item = {}) {
               <option value="${product.id}"
                 data-name="${escapeHtml(product.product_name)}"
                 data-unit-price="${product.unit_price || 0}"
-                data-cost-price="${product.cost_price || 0}"
                 ${item.inventory_id === product.id ? 'selected' : ''}>
                 ${escapeHtml(product.product_name)} (NGN ${Number(product.unit_price || 0).toFixed(2)})
               </option>
@@ -1039,11 +1145,6 @@ function createInvoiceItemRow(index, inventory, item = {}) {
         </div>
         
         <div class="item-grid">
-          <div class="item-form-group">
-            <label>Unit</label>
-            <input name="unit" type="text" class="form-control" value="${escapeHtml(item.unit || '')}" placeholder="e.g. pcs, kg">
-          </div>
-          
           <div class="item-form-group">
             <label>Quantity</label>
             <input name="quantity" type="number" min="1" class="form-control" value="${Number(item.quantity || 1)}">
@@ -1057,13 +1158,6 @@ function createInvoiceItemRow(index, inventory, item = {}) {
           <div class="item-form-group">
             <label>Total (NGN)</label>
             <input name="total_price" type="number" min="0" step="0.01" class="form-control total-price-input" value="${Number(item.total_price || (Number(item.quantity || 1) * Number(item.unit_price || 0))).toFixed(2)}" readonly>
-          </div>
-        </div>
-        
-        <div class="item-cost-info">
-          <div class="cost-field">
-            <label>Cost Price</label>
-            <input name="cost_price" type="number" min="0" step="0.01" class="form-control" value="${Number(item.cost_price || 0).toFixed(2)}" placeholder="For profit calculation">
           </div>
         </div>
       </div>

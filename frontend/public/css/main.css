@@ -1240,6 +1240,34 @@ html, body {
   border-color: var(--primary);
 }
 
+.invoice-card-actions .btn-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: var(--border);
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.invoice-badges {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.contact-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 159, 67, 0.16);
+  color: #b35a00;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 /* ─── RESPONSIVE ───────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .nav-toggle {
