@@ -32,13 +32,65 @@ async function invoiceHasColumn(column) {
   return hasColumn;
 }
 
+const customerSchemaCache = new Set();
+async function customerHasColumn(column) {
+  if (customerSchemaCache.has(column)) {
+    return true;
+  }
+
+  const schemaResult = await query(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_name = 'customers' AND column_name = $1
+     LIMIT 1`,
+    [column]
+  );
+
+  const hasColumn = schemaResult.rows.length > 0;
+  if (hasColumn) {
+    customerSchemaCache.add(column);
+  }
+  return hasColumn;
+}
+
+async function buildCustomerSelectFields() {
+  const baseFields = ['c.id', 'c.name', 'c.phone', 'c.email'];
+  const optionalColumns = ['city', 'region', 'delivery_address', 'birthday', 'anniversary', 'auto_birthday', 'auto_anniversary'];
+  const hasColumns = await Promise.all(optionalColumns.map(customerHasColumn));
+
+  optionalColumns.forEach((column, index) => {
+    if (hasColumns[index]) {
+      baseFields.push(`c.${column}`);
+    } else {
+      baseFields.push(`NULL AS ${column}`);
+    }
+  });
+
+  return baseFields.join(', ');
+}
+
+async function buildCustomerReturningFields() {
+  const fields = ['id', 'name', 'phone', 'email'];
+  const optionalColumns = ['city', 'region', 'delivery_address', 'birthday', 'anniversary', 'auto_birthday', 'auto_anniversary'];
+  const hasColumns = await Promise.all(optionalColumns.map(customerHasColumn));
+
+  optionalColumns.forEach((column, index) => {
+    if (hasColumns[index]) {
+      fields.push(column);
+    } else {
+      fields.push(`NULL AS ${column}`);
+    }
+  });
+
+  fields.push('created_at', 'updated_at');
+  return fields.join(', ');
+}
+
 class BusinessService {
   async getCustomers(userId) {
     logger.debug(`Fetching customers for user ${userId}`);
+    const customerSelectFields = await buildCustomerSelectFields();
     const result = await query(
-      `SELECT c.id, c.name, c.phone, c.email, c.city, c.region, c.delivery_address,
-              c.birthday, c.anniversary, c.auto_birthday, c.auto_anniversary,
-              c.created_at, c.updated_at,
+      `SELECT ${customerSelectFields},
               COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1), 0) AS invoice_count,
               COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1 AND i.status = 'paid'), 0) AS paid_invoices,
               COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1 AND i.status != 'paid'), 0) AS pending_invoices,
@@ -54,10 +106,10 @@ class BusinessService {
 
   async getCustomerById(userId, customerId) {
     logger.debug(`Fetching customer ${customerId} for user ${userId}`);
+    const customerSelectFields = await buildCustomerSelectFields();
 
     const customerResult = await query(
-      `SELECT c.id, c.name, c.phone, c.email, c.city, c.region, c.delivery_address,
-              c.birthday, c.anniversary, c.auto_birthday, c.auto_anniversary,
+      `SELECT ${customerSelectFields},
               COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1), 0) AS invoice_count,
               COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1 AND i.status = 'paid'), 0) AS paid_invoices,
               COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1 AND i.status != 'paid'), 0) AS pending_invoices,
@@ -89,58 +141,64 @@ class BusinessService {
   }
 
   async updateCustomer(userId, customerId, customer) {
+    const optionalColumns = ['city', 'region', 'delivery_address', 'birthday', 'anniversary', 'auto_birthday', 'auto_anniversary'];
+    const hasColumns = await Promise.all(optionalColumns.map(customerHasColumn));
+
+    const updateColumns = ['name = $1', 'phone = $2', 'email = $3'];
+    const values = [customer.name, customer.phone || null, customer.email || null];
+
+    optionalColumns.forEach((column, index) => {
+      if (hasColumns[index]) {
+        updateColumns.push(`${column} = $${values.length + 1}`);
+        let value = customer[column];
+        if (column === 'auto_birthday' || column === 'auto_anniversary') {
+          value = parseBool(value);
+        }
+        values.push(value || null);
+      }
+    });
+
+    values.push(userId, customerId);
+    const returningFields = await buildCustomerReturningFields();
+
     const result = await query(
       `UPDATE customers
-       SET name = $1,
-           phone = $2,
-           email = $3,
-           city = $4,
-           region = $5,
-           delivery_address = $6,
-           birthday = $7,
-           anniversary = $8,
-           auto_birthday = $9,
-           auto_anniversary = $10,
+       SET ${updateColumns.join(', ')},
            updated_at = NOW()
-       WHERE user_id = $11 AND id = $12
-       RETURNING id, name, phone, email, city, region, delivery_address, birthday, anniversary, auto_birthday, auto_anniversary, created_at, updated_at`,
-      [
-        customer.name,
-        customer.phone || null,
-        customer.email || null,
-        customer.city || null,
-        customer.region || null,
-        customer.delivery_address || null,
-        customer.birthday || null,
-        customer.anniversary || null,
-        parseBool(customer.auto_birthday),
-        parseBool(customer.auto_anniversary),
-        userId,
-        customerId,
-      ]
+       WHERE user_id = $${values.length - 1} AND id = $${values.length}
+       RETURNING ${returningFields}`,
+      values
     );
 
     return result.rows[0] || null;
   }
 
   async createCustomer(userId, customer) {
+    const optionalColumns = ['city', 'region', 'delivery_address', 'birthday', 'anniversary', 'auto_birthday', 'auto_anniversary'];
+    const hasColumns = await Promise.all(optionalColumns.map(customerHasColumn));
+
+    const insertColumns = ['user_id', 'name', 'phone', 'email'];
+    const values = [userId, customer.name, customer.phone || null, customer.email || null];
+
+    optionalColumns.forEach((column, index) => {
+      if (hasColumns[index]) {
+        insertColumns.push(column);
+        let value = customer[column];
+        if (column === 'auto_birthday' || column === 'auto_anniversary') {
+          value = parseBool(value);
+        }
+        values.push(value || null);
+      }
+    });
+
+    const placeholders = values.map((_, idx) => `$${idx + 1}`);
+    const returningFields = await buildCustomerReturningFields();
+
     const result = await query(
-      `INSERT INTO customers (user_id, name, phone, email, city, region, delivery_address, birthday, anniversary, auto_birthday, auto_anniversary, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
-       RETURNING id, name, phone, email, city, region, delivery_address, birthday, anniversary, auto_birthday, auto_anniversary, created_at, updated_at`,
-      [
-        userId,
-        customer.name,
-        customer.phone || null,
-        customer.email || null,
-        customer.city || null,
-        customer.region || null,
-        customer.delivery_address || null,
-        customer.birthday || null,
-        customer.anniversary || null,
-        parseBool(customer.auto_birthday),
-        parseBool(customer.auto_anniversary),
-      ]
+      `INSERT INTO customers (${insertColumns.join(', ')}, created_at, updated_at)
+       VALUES (${placeholders.join(', ')}, NOW(), NOW())
+       RETURNING ${returningFields}`,
+      values
     );
     return result.rows[0];
   }
@@ -151,8 +209,9 @@ class BusinessService {
     }
 
     if (customer.customer_id) {
+      const returningFields = await buildCustomerReturningFields();
       const result = await query(
-        `SELECT id, name, phone, email, city, region, delivery_address, birthday, anniversary
+        `SELECT ${returningFields}
          FROM customers
          WHERE id = $1 AND user_id = $2
          LIMIT 1`,
@@ -615,7 +674,12 @@ class BusinessService {
       [userId]
     );
 
-    const topCities = await query(
+    const hasCity = await customerHasColumn('city');
+    const hasRegion = await customerHasColumn('region');
+    const hasBirthday = await customerHasColumn('birthday');
+    const hasAnniversary = await customerHasColumn('anniversary');
+
+    const topCities = hasCity ? await query(
       `SELECT c.city, COUNT(*) AS customers, COALESCE(SUM(i.amount), 0) AS revenue
        FROM customers c
        LEFT JOIN invoices i ON i.customer_id = c.id AND i.user_id = $1
@@ -624,9 +688,9 @@ class BusinessService {
        ORDER BY revenue DESC
        LIMIT 5`,
       [userId]
-    );
+    ) : { rows: [] };
 
-    const topRegions = await query(
+    const topRegions = hasRegion ? await query(
       `SELECT c.region, COUNT(*) AS customers, COALESCE(SUM(i.amount), 0) AS revenue
        FROM customers c
        LEFT JOIN invoices i ON i.customer_id = c.id AND i.user_id = $1
@@ -635,25 +699,25 @@ class BusinessService {
        ORDER BY revenue DESC
        LIMIT 5`,
       [userId]
-    );
+    ) : { rows: [] };
 
-    const upcomingBirthdays = await query(
+    const upcomingBirthdays = hasBirthday ? await query(
       `SELECT id, name, phone, email, birthday
        FROM customers
        WHERE user_id = $1 AND birthday IS NOT NULL
        ORDER BY birthday ASC
        LIMIT 5`,
       [userId]
-    );
+    ) : { rows: [] };
 
-    const upcomingAnniversaries = await query(
+    const upcomingAnniversaries = hasAnniversary ? await query(
       `SELECT id, name, phone, email, anniversary
        FROM customers
        WHERE user_id = $1 AND anniversary IS NOT NULL
        ORDER BY anniversary ASC
        LIMIT 5`,
       [userId]
-    );
+    ) : { rows: [] };
 
     return {
       total_customers: Number(summaryResult.rows[0].total_customers || 0),
