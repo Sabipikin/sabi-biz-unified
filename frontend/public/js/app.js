@@ -200,6 +200,10 @@ function parseRouteHash(hash = window.location.hash) {
   };
 }
 
+function getCurrentRoute() {
+  return parseRouteHash();
+}
+
 function getDefaultDashboardRoute() {
   const configuredRoute = normalizeRouteName(window.SABIBIZ_INITIAL_ROUTE || defaultRoute);
   return dashboardRoutes.has(configuredRoute) ? configuredRoute : 'dashboard';
