@@ -611,13 +611,14 @@ function renderDashboardShell() {
   const collapsed = isSidebarCollapsed();
   app.innerHTML = `
     <div class="dashboard ${collapsed ? 'sidebar-collapsed' : ''}">
+      <button type="button" id="navToggle" class="nav-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="navbarMenu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      <div class="nav-backdrop" id="navBackdrop" aria-hidden="true"></div>
       <nav class="navbar" aria-label="Primary navigation">
         <div class="navbar-brand">
-          <button type="button" id="navToggle" class="nav-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="navbarMenu">
-            <span></span>
-            <span></span>
-            <span></span>
-          </button>
           <h1><span class="brand-mark">S</span><span class="brand-text">SabiBiz</span></h1>
           <button type="button" id="sidebarCollapse" class="sidebar-collapse" aria-controls="navbarMenu" aria-expanded="${String(!collapsed)}" aria-label="${collapsed ? 'Expand menu' : 'Collapse menu'}" title="${collapsed ? 'Expand menu' : 'Collapse menu'}">
             <span aria-hidden="true"></span>
@@ -673,13 +674,23 @@ function renderDashboardShell() {
   const navToggle = document.getElementById('navToggle');
   const navbarMenu = document.getElementById('navbarMenu');
   const sidebarCollapse = document.getElementById('sidebarCollapse');
+  const dashboard = document.querySelector('.dashboard');
+  const navBackdrop = document.getElementById('navBackdrop');
   applyNavIconLabels();
+
+  function setMobileMenuOpen(isOpen) {
+    dashboard?.classList.toggle('mobile-menu-open', isOpen);
+    navbarMenu?.classList.toggle('active', isOpen);
+    navToggle?.classList.toggle('active', isOpen);
+    navToggle?.setAttribute('aria-expanded', String(isOpen));
+    navToggle?.setAttribute('aria-label', isOpen ? 'Close menu' : 'Open menu');
+  }
   
   navToggle?.addEventListener('click', () => {
-    const isOpen = navbarMenu?.classList.toggle('active') || false;
-    navToggle.classList.toggle('active', isOpen);
-    navToggle.setAttribute('aria-expanded', String(isOpen));
+    setMobileMenuOpen(!dashboard?.classList.contains('mobile-menu-open'));
   });
+
+  navBackdrop?.addEventListener('click', () => setMobileMenuOpen(false));
 
   sidebarCollapse?.addEventListener('click', () => {
     setSidebarCollapsed(!document.querySelector('.dashboard')?.classList.contains('sidebar-collapsed'));
@@ -687,9 +698,13 @@ function renderDashboardShell() {
 
   navbarMenu?.addEventListener('click', (e) => {
     if (e.target.closest('a') && !e.target.closest('.nav-toggle')) {
-      navbarMenu.classList.remove('active');
-      navToggle?.classList.remove('active');
-      navToggle?.setAttribute('aria-expanded', 'false');
+      setMobileMenuOpen(false);
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      setMobileMenuOpen(false);
     }
   });
 
