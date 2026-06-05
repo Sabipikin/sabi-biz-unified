@@ -82,3 +82,11 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// Allow the page to tell the service worker to skip waiting and become active immediately
+self.addEventListener('message', (event) => {
+  const data = event.data || {};
+  if (data && data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});

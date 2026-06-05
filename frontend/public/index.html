@@ -24,12 +24,42 @@
   <script>
     // Service worker registration for offline support
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').then(reg => {
+      window.addEventListener('load', async () => {
+        try {
+          const reg = await navigator.serviceWorker.register('./sw.js');
           console.log('✓ Service Worker registered');
-        }).catch(err => {
+
+          // Ask the service worker to check for updates immediately
+          try { reg.update(); } catch (e) {}
+
+          // When a new service worker is found, ask it to skipWaiting so it becomes active
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+
+          reg.addEventListener('updatefound', () => {
+            const installing = reg.installing;
+            if (!installing) return;
+            installing.addEventListener('statechange', () => {
+              if (installing.state === 'installed' && reg.waiting) {
+                // Tell the waiting worker to become active
+                reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+              }
+            });
+          });
+
+          // When the active worker changes, reload so new assets are used
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            console.log('Service worker controller changed — reloading to apply update');
+            try {
+              window.location.reload();
+            } catch (e) {
+              window.location.reload();
+            }
+          });
+        } catch (err) {
           console.log('✗ Service Worker registration failed:', err);
-        });
+        }
       });
     }
   </script>
