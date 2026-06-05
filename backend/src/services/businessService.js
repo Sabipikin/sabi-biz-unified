@@ -1402,9 +1402,9 @@ class BusinessService {
   }
 
   async createBulkSales(userId, salesBatch) {
-    // Expects array of sales with same customer but different products
+    // Expects an object with same customer and multiple product lines
     // salesBatch structure: { customerId, saleDate, products: [{ inventoryId, quantity, unitPrice, costPrice, bonusAdjustment, adjustmentReason }] }
-    if (!Array.isArray(salesBatch) || !salesBatch.products || salesBatch.products.length === 0) {
+    if (!salesBatch || !Array.isArray(salesBatch.products) || salesBatch.products.length === 0) {
       throw new Error('Invalid bulk sales format');
     }
 
