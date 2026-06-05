@@ -1321,6 +1321,23 @@ class BusinessService {
     return result.rows;
   }
 
+  async getSalesByDateRange(userId, fromDate, toDate) {
+    const params = [userId];
+    let where = 'WHERE user_id = $1';
+    if (fromDate) {
+      params.push(fromDate);
+      where += ` AND sale_date >= $${params.length}`;
+    }
+    if (toDate) {
+      params.push(toDate);
+      where += ` AND sale_date <= $${params.length}`;
+    }
+
+    const q = `SELECT id, inventory_id, product_name, quantity, unit_price, cost_price, total_amount, profit, bonus_adjustment, adjustment_reason, customer_id, sale_date, sale_time, created_at FROM sales ${where} ORDER BY sale_date DESC, created_at DESC`;
+    const result = await query(q, params);
+    return result.rows;
+  }
+
   async createSale(userId, sale) {
     const client = await getClient();
     try {

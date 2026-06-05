@@ -2444,7 +2444,26 @@ async function renderSales() {
 
       <div class="sales-history-section">
         <h3>Sales History</h3>
-        ${renderSalesHistoryCards(sales)}
+        <div class="form-row">
+          <div class="form-group">
+            <label for="salesFrom">From</label>
+            <input id="salesFrom" type="date" value="${new Date(new Date().setDate(new Date().getDate()-30)).toISOString().slice(0,10)}">
+          </div>
+          <div class="form-group">
+            <label for="salesTo">To</label>
+            <input id="salesTo" type="date" value="${new Date().toISOString().slice(0,10)}">
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <div class="button-row">
+              <button type="button" id="filterSalesButton" class="btn secondary small">Filter</button>
+              <button type="button" id="downloadSalesButton" class="btn-primary small">Download Excel</button>
+            </div>
+          </div>
+        </div>
+        <div id="salesTableContainer">
+          ${renderSalesTable(sales)}
+        </div>
       </div>
     </div>
   `;
@@ -2756,6 +2775,84 @@ async function renderSales() {
       return;
     }
   });
+
+  // Sales table filter and export
+  document.getElementById('filterSalesButton')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const from = document.getElementById('salesFrom').value;
+    const to = document.getElementById('salesTo').value;
+    const filtered = sales.filter(s => {
+      const d = s.sale_date ? s.sale_date.slice(0,10) : (s.sale_time ? s.sale_time.slice(0,10) : null);
+      if (!d) return false;
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      return true;
+    });
+    document.getElementById('salesTableContainer').innerHTML = renderSalesTable(filtered);
+  });
+
+  document.getElementById('downloadSalesButton')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const from = document.getElementById('salesFrom').value;
+    const to = document.getElementById('salesTo').value;
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const url = `${API_BASE}/api/business/sales/export?${params.toString()}`;
+    try {
+      const token = getToken();
+      const resp = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: token ? `Bearer ${token}` : undefined,
+        },
+      });
+      if (!resp.ok) {
+        const payload = await resp.json().catch(() => null);
+        notify(payload?.message || 'Export failed', 'error');
+        return;
+      }
+      const blob = await resp.blob();
+      let filename = `sales_${from || 'start'}_to_${to || 'end'}.xlsx`;
+      const disp = resp.headers.get('Content-Disposition');
+      if (disp) {
+        const m = disp.match(/filename="?([^";]+)"?/);
+        if (m) filename = m[1];
+      }
+      const urlBlob = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = urlBlob;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(urlBlob);
+      notify('Export downloaded.');
+    } catch (err) {
+      notify(err?.message || 'Export failed', 'error');
+    }
+  });
+
+  function generateSalesCSV(rows) {
+    const headers = ['id','product_name','quantity','unit_price','total_amount','profit','bonus_adjustment','adjustment_reason','customer_id','sale_date'];
+    const lines = [headers.join(',')];
+    rows.forEach(r => {
+      const line = [
+        r.id,
+        `"${(r.product_name||'').replace(/"/g,'""')}"`,
+        r.quantity || 0,
+        r.unit_price || 0,
+        r.total_amount || 0,
+        r.profit || 0,
+        r.bonus_adjustment || 0,
+        `"${(r.adjustment_reason||'').replace(/"/g,'""') }"`,
+        r.customer_id || '',
+        r.sale_date || r.sale_time || ''
+      ];
+      lines.push(line.join(','));
+    });
+    return lines.join('\n');
+  }
 }
 
 function renderSalesHistoryCards(sales) {
