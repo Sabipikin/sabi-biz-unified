@@ -2,6 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
+const XLSX = require('xlsx');
 const { authMiddleware } = require('../middleware/auth');
 const businessService = require('../services/businessService');
 
@@ -27,6 +28,45 @@ router.get('/customers/analytics', authMiddleware, async (req, res, next) => {
   try {
     const analytics = await businessService.getCustomerAnalytics(req.user.userId);
     res.json({ success: true, data: analytics });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/customers/export', authMiddleware, async (req, res, next) => {
+  try {
+    const { from, to } = req.query;
+    const customers = await businessService.getCustomersExport(req.user.userId, from, to);
+    const rows = customers.map(c => ({
+      id: c.id,
+      name: c.name,
+      phone: c.phone || '',
+      email: c.email || '',
+      city: c.city || '',
+      region: c.region || '',
+      delivery_address: c.delivery_address || '',
+      birthday: c.birthday || '',
+      anniversary: c.anniversary || '',
+      auto_birthday: c.auto_birthday ? 'Yes' : 'No',
+      auto_anniversary: c.auto_anniversary ? 'Yes' : 'No',
+      invoice_count: c.invoice_count,
+      paid_invoices: c.paid_invoices,
+      pending_invoices: c.pending_invoices,
+      total_spent: c.total_spent,
+      total_profit: c.total_profit,
+      created_at: c.created_at,
+      updated_at: c.updated_at,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Customers');
+    const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
+
+    const filename = `customers_export_${new Date().toISOString().slice(0,10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   } catch (err) {
     next(err);
   }
@@ -98,6 +138,18 @@ router.put('/customers/:id', authMiddleware, async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Customer not found' });
     }
     res.json({ success: true, data: customer });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/customers/:id', authMiddleware, async (req, res, next) => {
+  try {
+    const deleted = await businessService.deleteCustomer(req.user.userId, req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'Customer not found' });
+    }
+    res.json({ success: true, data: { id: deleted.id } });
   } catch (err) {
     next(err);
   }

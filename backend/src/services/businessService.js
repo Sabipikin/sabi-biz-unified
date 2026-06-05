@@ -463,6 +463,44 @@ class BusinessService {
     };
   }
 
+  async deleteCustomer(userId, customerId) {
+    const result = await query(
+      `DELETE FROM customers
+       WHERE user_id = $1 AND id = $2
+       RETURNING id`,
+      [userId, customerId]
+    );
+    return result.rows[0] || null;
+  }
+
+  async getCustomersExport(userId, fromDate, toDate) {
+    const customerSelectFields = await buildCustomerSelectFields();
+    const queryParts = [userId];
+    let sql = `SELECT ${customerSelectFields},
+                    COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1), 0) AS invoice_count,
+                    COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1 AND i.status = 'paid'), 0) AS paid_invoices,
+                    COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1 AND i.status != 'paid'), 0) AS pending_invoices,
+                    COALESCE((SELECT SUM(amount) FROM invoices i WHERE i.customer_id = c.id AND i.user_id = $1), 0) AS total_spent,
+                    COALESCE((SELECT SUM(ii.total_price - ii.cost_price) FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id WHERE i.customer_id = c.id AND i.user_id = $1), 0) AS total_profit,
+                    c.created_at,
+                    c.updated_at
+             FROM customers c
+             WHERE c.user_id = $1`;
+
+    if (fromDate) {
+      queryParts.push(fromDate);
+      sql += ` AND c.created_at::date >= $${queryParts.length}`;
+    }
+    if (toDate) {
+      queryParts.push(toDate);
+      sql += ` AND c.created_at::date <= $${queryParts.length}`;
+    }
+    sql += ' ORDER BY c.name ASC';
+
+    const result = await query(sql, queryParts);
+    return result.rows;
+  }
+
   async updateCustomer(userId, customerId, customer) {
     const optionalColumns = ['city', 'region', 'delivery_address', 'birthday', 'anniversary', 'auto_birthday', 'auto_anniversary'];
     const hasColumns = await Promise.all(optionalColumns.map(customerHasColumn));

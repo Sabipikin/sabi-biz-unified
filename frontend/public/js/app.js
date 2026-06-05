@@ -107,6 +107,9 @@ const API = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+    deleteCustomer: (id) => API.request(`/api/business/customers/${id}`, {
+      method: 'DELETE',
+    }),
     invoices: () => API.request('/api/business/invoices'),
     invoice: (id) => API.request(`/api/business/invoices/${id}`),
     createInvoice: (data) => API.request('/api/business/invoices', {
@@ -1707,6 +1710,7 @@ async function renderCustomers() {
               <option value="paid">Paid</option>
               <option value="pending">Pending</option>
             </select>
+            <button id="downloadCustomersButton" class="btn btn-secondary">Download Excel</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -1720,6 +1724,7 @@ async function renderCustomers() {
                 <th>Profit</th>
                 <th>Invoices</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="customerTableBody">
@@ -1851,12 +1856,80 @@ async function renderCustomers() {
           <td>${formatMoney(customer.total_profit)}</td>
           <td>${customer.invoice_count || 0}</td>
           <td><span class="status-pill ${status}">${status === 'pending' ? `${customer.pending_invoices} pending` : 'Paid'}</span></td>
+          <td class="table-actions-cell">
+            <button type="button" class="btn small" data-action="edit-customer" data-customer-id="${customer.id}">Edit</button>
+            <button type="button" class="btn small danger delete-customer" data-customer-id="${customer.id}">Delete</button>
+          </td>
         </tr>
       `;
     }).join('');
   };
 
   const updateCustomerList = () => renderCustomerTable(filterCustomers());
+
+  document.getElementById('customerTableBody')?.addEventListener('click', async (event) => {
+    const editBtn = event.target.closest('[data-action="edit-customer"]');
+    if (editBtn) {
+      const customerId = editBtn.dataset.customerId;
+      if (customerId) {
+        window.location.hash = `#/customers/${customerId}`;
+      }
+      return;
+    }
+
+    const deleteBtn = event.target.closest('.delete-customer');
+    if (deleteBtn) {
+      event.preventDefault();
+      const customerId = deleteBtn.dataset.customerId;
+      if (!customerId) return;
+      if (!confirm('Delete this customer? This will keep invoices but remove the customer profile.')) return;
+      const response = await API.business.deleteCustomer(customerId);
+      if (response?.success) {
+        notify('Customer deleted.');
+        await renderCustomers();
+      } else {
+        notify(response?.message || 'Unable to delete customer.', 'error');
+      }
+      return;
+    }
+  });
+
+  document.getElementById('downloadCustomersButton')?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    const url = `${API_BASE}/api/business/customers/export`;
+    try {
+      const token = getToken();
+      const resp = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: token ? `Bearer ${token}` : undefined,
+        },
+      });
+      if (!resp.ok) {
+        const payload = await resp.json().catch(() => null);
+        notify(payload?.message || 'Customer export failed', 'error');
+        return;
+      }
+      const blob = await resp.blob();
+      let filename = `customers_export.xlsx`;
+      const disp = resp.headers.get('Content-Disposition');
+      if (disp) {
+        const m = disp.match(/filename="?([^";]+)"?/);
+        if (m) filename = m[1];
+      }
+      const urlBlob = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = urlBlob;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(urlBlob);
+      notify('Customer export downloaded.');
+    } catch (err) {
+      notify(err?.message || 'Customer export failed', 'error');
+    }
+  });
 
   [searchInput, cityFilter, regionFilter, statusFilter].forEach((input) => {
     if (!input) return;
@@ -1881,6 +1954,7 @@ async function renderCustomerDetail(customerId) {
         <div class="header-actions">
           <button id="backToCustomers" class="btn-secondary">Back to Customers</button>
           <button id="toggleEditCustomer" class="btn-primary">Edit</button>
+          <button id="deleteCustomerButton" class="btn danger">Delete</button>
         </div>
       </div>
       ${error ? renderSectionError(error) : ''}
@@ -2147,6 +2221,18 @@ async function renderCustomerDetail(customerId) {
 
   // Start in view mode
   showView();
+
+  document.getElementById('deleteCustomerButton')?.addEventListener('click', async () => {
+    if (!confirm('Delete this customer? This will keep invoices but remove the customer profile.')) return;
+    const response = await API.business.deleteCustomer(customerId);
+    if (response?.success) {
+      notify('Customer deleted.');
+      window.location.hash = '#/customers';
+      await renderCustomers();
+    } else {
+      notify(response?.message || 'Unable to delete customer.', 'error');
+    }
+  });
 
   // Live per-field validation while typing or on blur
   (function setupLiveValidation() {
