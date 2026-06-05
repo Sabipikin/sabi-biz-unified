@@ -4,6 +4,11 @@
 console.log('[STARTUP] Loading .env...');
 require('dotenv').config();
 
+// Warn if critical secrets are not configured
+if (!process.env.JWT_SECRET) {
+  console.warn('[STARTUP] WARNING: JWT_SECRET is not set. Authentication token generation will fail.');
+}
+
 console.log('[STARTUP] Loading core dependencies...');
 const express = require('express');
 const cors = require('cors');
