@@ -22,6 +22,7 @@ console.log('[STARTUP] Loading db module...');
 const { query, testConnection } = require('./config/db');
 console.log('[STARTUP] Loading dbRetry module...');
 const { ensureDbConnected } = require('./config/dbRetry');
+const { runMigrations } = require('./config/migrate');
 const adminUserService = require('./services/adminUserService');
 const businessService = require('./services/businessService');
 console.log('[STARTUP] Loading middleware...');
@@ -236,6 +237,14 @@ try {
   try {
     const now = await ensureDbConnected(5);
     logger.info(`✓ DB connected after retries: ${JSON.stringify(now)}`);
+
+    const migrationResult = await runMigrations();
+    if (!migrationResult.success) {
+      logger.error('Database migration failed:', migrationResult.error);
+    } else if (migrationResult.migrations > 0) {
+      logger.info(`✓ Applied ${migrationResult.migrations} database migration(s)`);
+    }
+
     const admin = await adminUserService.ensureSuperAdmin();
     logger.info(`✓ Super admin ready: ${admin.email}`);
     startupLogger.info('Server started with DB connected', { port: PORT });
