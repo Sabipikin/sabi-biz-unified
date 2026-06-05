@@ -2394,9 +2394,10 @@ async function renderSales() {
                 <label for="saleCustomer">Select or Create Customer</label>
                 <select id="saleCustomer" name="customer_id">
                   <option value="">No customer (Cash sale)</option>
-                  ${customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}${c.phone ? ` — ${c.phone}` : ''}</option>`).join('')}
+                  ${customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}${c.phone ? ` — ${escapeHtml(c.phone)}` : ''}</option>`).join('')}
                   <option value="__new__">+ Create new customer</option>
                 </select>
+                <p class="form-help">Choose an existing customer or create a new one for this sale.</p>
               </div>
               <div id="newCustomerForm" style="display:none">
                 <div class="form-group">
@@ -2422,6 +2423,7 @@ async function renderSales() {
 
           <div class="form-section">
             <h4>Products (Add one or more)</h4>
+            <p class="form-help">Each card below represents one product line. Click "+ Add Product" to include multiple products in the same sale.</p>
             <div id="productsContainer" class="products-container"></div>
             <button type="button" id="addProductButton" class="btn secondary">+ Add Product</button>
           </div>
@@ -2511,23 +2513,24 @@ async function renderSales() {
     `;
   }
 
-  function attachProductListeners(index) {
-    const productSelect = document.querySelector(`[name="product_${index}"]`);
-    const quantityInput = document.querySelector(`[name="quantity_${index}"]`);
-    const unitPriceInput = document.querySelector(`[name="unitPrice_${index}"]`);
-    const costPriceInput = document.querySelector(`[name="costPrice_${index}"]`);
+  function attachProductListeners(card, index) {
+    const productSelect = card.querySelector(`[name="product_${index}"]`);
+    const quantityInput = card.querySelector(`[name="quantity_${index}"]`);
+    const unitPriceInput = card.querySelector(`[name="unitPrice_${index}"]`);
+    const costPriceInput = card.querySelector(`[name="costPrice_${index}"]`);
+    const bonusInput = card.querySelector(`[name="bonus_${index}"]`);
 
     const updateSummary = () => {
       const qty = Number(quantityInput?.value || 0);
       const unitPrice = Number(unitPriceInput?.value || 0);
       const costPrice = Number(costPriceInput?.value || 0);
-      const bonus = Number(document.querySelector(`[name="bonus_${index}"]`)?.value || 0);
+      const bonus = Number(bonusInput?.value || 0);
 
       const subtotal = qty * unitPrice;
       const profit = (qty * (unitPrice - costPrice)) + bonus;
 
-      const subtotalEl = document.querySelector(`.subtotal-${index}`);
-      const profitEl = document.querySelector(`.profit-${index}`);
+      const subtotalEl = card.querySelector(`.subtotal-${index}`);
+      const profitEl = card.querySelector(`.profit-${index}`);
       if (subtotalEl) subtotalEl.textContent = formatMoney(subtotal);
       if (profitEl) profitEl.textContent = formatMoney(profit);
     };
@@ -2542,19 +2545,21 @@ async function renderSales() {
     quantityInput?.addEventListener('input', updateSummary);
     unitPriceInput?.addEventListener('input', updateSummary);
     costPriceInput?.addEventListener('input', updateSummary);
-    document.querySelector(`[name="bonus_${index}"]`)?.addEventListener('input', updateSummary);
+    bonusInput?.addEventListener('input', updateSummary);
 
-    document.querySelector(`[data-index="${index}"] .btn-remove-product`)?.addEventListener('click', (e) => {
+    const removeButton = card.querySelector('.btn-remove-product');
+    removeButton?.addEventListener('click', (e) => {
       e.preventDefault();
-      document.querySelector(`[data-product-index="${index}"]`)?.remove();
+      card.remove();
     });
   }
 
   function addProductCard() {
     const card = document.createElement('div');
     card.innerHTML = renderProductCard(productIndex);
-    productsContainer.appendChild(card.firstElementChild);
-    attachProductListeners(productIndex);
+    const cardElement = card.firstElementChild;
+    productsContainer.appendChild(cardElement);
+    attachProductListeners(cardElement, productIndex);
     productIndex++;
   }
 
@@ -2602,13 +2607,13 @@ async function renderSales() {
     const products = [];
     let valid = true;
 
-    productCards.forEach((card, idx) => {
-      const productId = card.querySelector(`[name="product_${idx}"]`)?.value;
-      const qty = Number(card.querySelector(`[name="quantity_${idx}"]`)?.value || 0);
-      const unitPrice = Number(card.querySelector(`[name="unitPrice_${idx}"]`)?.value || 0);
-      const costPrice = Number(card.querySelector(`[name="costPrice_${idx}"]`)?.value || 0);
-      const bonus = Number(card.querySelector(`[name="bonus_${idx}"]`)?.value || 0);
-      const reason = card.querySelector(`[name="reason_${idx}"]`)?.value || '';
+    productCards.forEach((card) => {
+      const productId = card.querySelector('.product-select')?.value;
+      const qty = Number(card.querySelector('.quantity-input')?.value || 0);
+      const unitPrice = Number(card.querySelector('.unit-price-input')?.value || 0);
+      const costPrice = Number(card.querySelector('.cost-price-input')?.value || 0);
+      const bonus = Number(card.querySelector('.bonus-input')?.value || 0);
+      const reason = card.querySelector('.reason-input')?.value || '';
 
       if (!productId || qty <= 0 || unitPrice <= 0) {
         valid = false;
@@ -2712,7 +2717,6 @@ function renderSalesTable(sales) {
         <thead>
           <tr>
             <th>Product</th>
-            <th>Unit</th>
             <th>Quantity</th>
             <th>Unit Price</th>
             <th>Total</th>
@@ -2724,7 +2728,6 @@ function renderSalesTable(sales) {
           ${sales.map(sale => `
             <tr>
               <td>${escapeHtml(sale.product_name || '-')}</td>
-              <td>${escapeHtml(sale.unit || '-')}</td>
               <td>${Number(sale.quantity || 0)}</td>
               <td>${formatMoney(sale.unit_price)}</td>
               <td>${formatMoney(sale.total_amount)}</td>
