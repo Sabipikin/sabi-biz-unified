@@ -3823,7 +3823,7 @@ function renderLogin() {
           <button type="submit" class="btn-primary">Sign In</button>
         </form>
         <p class="auth-footer">
-          Don't have an account? <a href="./register.html">Sign up here for 2 weeks free</a>
+          Don't have an account? <a href="#/register">Sign up here for 2 weeks free</a>
         </p>
       </div>
     </div>
