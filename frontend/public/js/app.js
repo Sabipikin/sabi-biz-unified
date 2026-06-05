@@ -539,6 +539,133 @@ function normalizePhone(value) {
   return hasPlus ? `+${digits}` : digits;
 }
 
+function isValidPhone(value) {
+  if (!value) return false;
+  const v = String(value).trim();
+  // Accept E.164-ish formats: optional +, 7-15 digits total
+  return /^\+?[1-9][0-9]{6,14}$/.test(v.replace(/[^0-9+]/g, ''));
+}
+
+function parseRecipientString(rawList, selEl) {
+  const arr = (rawList || '').split(',').map(s => s.trim()).filter(Boolean);
+  const seen = new Set();
+  const customersByPhone = {};
+  (window._cachedCustomers || []).forEach(c => {
+    if (c.phone) customersByPhone[normalizePhone(c.phone)] = c;
+  });
+
+  const items = arr.map(raw => {
+    const normalized = normalizePhone(raw);
+    const valid = isValidPhone(normalized);
+    const customer = customersByPhone[normalized] || null;
+    return { raw, normalized, valid, customer };
+  }).filter(it => {
+    if (!it.normalized) return false;
+    if (seen.has(it.normalized)) return false;
+    seen.add(it.normalized);
+    return true;
+  });
+
+  // also include phones from selected customers if provided
+  if (selEl) {
+    const selectedIds = Array.from(selEl.selectedOptions || []).map(o => o.value).filter(Boolean);
+    selectedIds.forEach(id => {
+      const opt = selEl.querySelector(`option[value="${id}"]`);
+      const p = (opt?.dataset?.phone || '').trim();
+      if (p) {
+        const normalized = normalizePhone(p);
+        if (!seen.has(normalized)) {
+          seen.add(normalized);
+          const customer = (window._cachedCustomers || []).find(c => normalizePhone(c.phone) === normalized) || null;
+          items.push({ raw: p, normalized, valid: isValidPhone(normalized), customer });
+        }
+      }
+    });
+  }
+
+  return items;
+}
+
+function showConfirmationPreview(items, onConfirm, onCancel) {
+  // items: [{raw, normalized, valid, customer}]
+  const existing = document.getElementById('confirmationPreviewModal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'confirmationPreviewModal';
+  modal.style.position = 'fixed';
+  modal.style.left = '0';
+  modal.style.top = '0';
+  modal.style.right = '0';
+  modal.style.bottom = '0';
+  modal.style.background = 'rgba(0,0,0,0.4)';
+  modal.style.display = 'flex';
+  modal.style.alignItems = 'center';
+  modal.style.justifyContent = 'center';
+  modal.style.zIndex = '9999';
+
+  const box = document.createElement('div');
+  box.style.background = '#fff';
+  box.style.padding = '16px';
+  box.style.borderRadius = '6px';
+  box.style.maxWidth = '720px';
+  box.style.width = '90%';
+  box.style.maxHeight = '80%';
+  box.style.overflow = 'auto';
+
+  const title = document.createElement('h3');
+  title.textContent = 'Confirm recipients';
+  box.appendChild(title);
+
+  const list = document.createElement('div');
+  list.style.margin = '8px 0 12px 0';
+  items.forEach(it => {
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.justifyContent = 'space-between';
+    row.style.padding = '6px 0';
+    const left = document.createElement('div');
+    left.textContent = `${it.customer ? it.customer.name + ' — ' : ''}${it.raw}`;
+    const right = document.createElement('div');
+    right.textContent = it.valid ? 'Valid' : 'Invalid';
+    right.style.color = it.valid ? 'green' : 'red';
+    row.appendChild(left);
+    row.appendChild(right);
+    list.appendChild(row);
+  });
+  box.appendChild(list);
+
+  const note = document.createElement('div');
+  note.style.fontSize = '13px';
+  note.style.color = '#555';
+  note.style.marginBottom = '12px';
+  note.textContent = 'Only valid numbers will be sent. Invalid numbers will be skipped.';
+  box.appendChild(note);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.display = 'flex';
+  btnRow.style.justifyContent = 'flex-end';
+  btnRow.style.gap = '8px';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'btn secondary';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.addEventListener('click', () => { modal.remove(); if (onCancel) onCancel(); });
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.type = 'button';
+  confirmBtn.className = 'btn-primary';
+  confirmBtn.textContent = 'Confirm and Send';
+  confirmBtn.addEventListener('click', () => { modal.remove(); if (onConfirm) onConfirm(); });
+
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(confirmBtn);
+  box.appendChild(btnRow);
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+}
+
 function validateCustomerForm(form) {
   const errors = [];
   const data = Object.fromEntries(new FormData(form).entries());
@@ -724,6 +851,188 @@ function renderDashboardShell() {
 
   document.getElementById('logoutButton').addEventListener('click', logout);
   setSidebarCollapsed(collapsed);
+  updateCustomerList();
+
+  // cache customers for quick lookup by phone during group sends
+  window._cachedCustomers = customers;
+
+  // update recipients field when selection changes
+  document.getElementById('milestoneCustomerSelect')?.addEventListener('change', (e) => {
+    const sel = e.currentTarget;
+    const recipientsEl = document.getElementById('milestoneRecipients');
+    if (!recipientsEl) return;
+    const selected = Array.from(sel.selectedOptions || []).map(o => (o.dataset?.phone || '').trim()).filter(Boolean);
+    const existing = (recipientsEl.value || '').split(',').map(s => s.trim()).filter(Boolean);
+    const merged = Array.from(new Set(existing.concat(selected)));
+    if (merged.length) recipientsEl.value = merged.join(', ');
+  });
+
+  // Milestone message generator handlers
+  document.getElementById('generateBirthdayForSelected')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const sel = document.getElementById('milestoneCustomerSelect');
+    const customerId = sel?.value;
+    if (!customerId) {
+      notify('Please select a customer to personalize the message.', 'error');
+      return;
+    }
+    // support multiple selections: if multiple selected, generate sample from first and auto-fill recipients
+    const selEl = document.getElementById('milestoneCustomerSelect');
+    const selectedOptions = Array.from(selEl.selectedOptions || []).map(o => o.value).filter(Boolean);
+    if (selectedOptions.length === 0) {
+      notify('Please select at least one customer.', 'error');
+      return;
+    }
+    const firstId = selectedOptions[0];
+    const res = await API.business.generateMilestoneMessage(firstId, 'birthday');
+    const data = getResponseData(res, null);
+    if (!data) {
+      notify(getResponseError(res, 'Unable to generate birthday message.'), 'error');
+      return;
+    }
+    document.getElementById('milestoneMessagePreview').value = data.message_text || '';
+    // populate recipients input with phones of selected customers
+    const recipientsEl = document.getElementById('milestoneRecipients');
+    const phones = selectedOptions.map(id => {
+      const opt = selEl.querySelector(`option[value="${id}"]`);
+      return (opt?.dataset?.phone || '').trim();
+    }).filter(Boolean);
+    if (phones.length) {
+      const existing = (recipientsEl.value || '').split(',').map(s => s.trim()).filter(Boolean);
+      const merged = Array.from(new Set(existing.concat(phones)));
+      recipientsEl.value = merged.join(', ');
+    }
+    notify('Birthday message generated. For multiple recipients, #name will be personalized on send.');
+  });
+
+  document.getElementById('generateAnniversaryForSelected')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const sel = document.getElementById('milestoneCustomerSelect');
+    const customerId = sel?.value;
+    if (!customerId) {
+      notify('Please select a customer to personalize the message.', 'error');
+      return;
+    }
+    const selEl = document.getElementById('milestoneCustomerSelect');
+    const selectedOptions = Array.from(selEl.selectedOptions || []).map(o => o.value).filter(Boolean);
+    if (selectedOptions.length === 0) {
+      notify('Please select at least one customer.', 'error');
+      return;
+    }
+    const firstId = selectedOptions[0];
+    const res = await API.business.generateMilestoneMessage(firstId, 'anniversary');
+    const data = getResponseData(res, null);
+    if (!data) {
+      notify(getResponseError(res, 'Unable to generate anniversary message.'), 'error');
+      return;
+    }
+    document.getElementById('milestoneMessagePreview').value = data.message_text || '';
+    const recipientsEl = document.getElementById('milestoneRecipients');
+    const phones = selectedOptions.map(id => {
+      const opt = selEl.querySelector(`option[value="${id}"]`);
+      return (opt?.dataset?.phone || '').trim();
+    }).filter(Boolean);
+    if (phones.length) {
+      const existing = (recipientsEl.value || '').split(',').map(s => s.trim()).filter(Boolean);
+      const merged = Array.from(new Set(existing.concat(phones)));
+      recipientsEl.value = merged.join(', ');
+    }
+    notify('Anniversary message generated. For multiple recipients, #name will be personalized on send.');
+  });
+
+  document.getElementById('sendMilestoneForSelected')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const selEl = document.getElementById('milestoneCustomerSelect');
+    const recipientsRaw = (document.getElementById('milestoneRecipients')?.value || '');
+    const msgTemplate = document.getElementById('milestoneMessagePreview')?.value || '';
+    if (!msgTemplate.trim()) {
+      notify('Message is empty. Generate or type a message before sending.', 'error');
+      return;
+    }
+
+    const items = parseRecipientString(recipientsRaw, selEl);
+    if (!items.length) {
+      notify('No recipient phone numbers found. Select customers or add phone numbers.', 'error');
+      return;
+    }
+
+    showConfirmationPreview(items, async () => {
+      const validItems = items.filter(i => i.valid);
+      if (!validItems.length) {
+        notify('No valid phone numbers to send to.', 'error');
+        return;
+      }
+
+      const results = [];
+      for (const it of validItems) {
+        const personalized = msgTemplate.replace(/#name/g, it.customer ? (it.customer.name || '') : '');
+        try {
+          const resp = await API.whatsapp.send({ toPhone: it.normalized, message: personalized });
+          results.push({ phone: it.normalized, ok: resp?.success !== false });
+        } catch (err) {
+          results.push({ phone: it.normalized, ok: false, error: err?.message });
+        }
+      }
+
+      const successCount = results.filter(r => r.ok).length;
+      const failCount = results.length - successCount;
+      const invalidCount = items.filter(i => !i.valid).length;
+      notify(`${successCount} message(s) sent${failCount ? `, ${failCount} failed` : ''}${invalidCount ? `, ${invalidCount} invalid skipped` : ''}.`);
+      if (successCount) document.getElementById('milestoneMessagePreview').value = '';
+    }, () => {
+      // cancelled
+      notify('Send cancelled.');
+    });
+  });
+
+  document.getElementById('copyMilestoneMessage')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const msg = document.getElementById('milestoneMessagePreview')?.value || '';
+    if (!msg.trim()) {
+      notify('Nothing to copy.', 'error');
+      return;
+    }
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(msg);
+        notify('Message copied to clipboard.');
+        updateMilestoneCopyStatus('Copied!');
+        return;
+      }
+    } catch (err) {
+      // fall back
+    }
+
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = msg;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      notify('Message copied to clipboard.');
+      updateMilestoneCopyStatus('Copied!');
+      return;
+    } catch (err) {
+      // continue to failure
+    }
+    notify('Unable to copy message.', 'error');
+  });
+}
+
+function updateMilestoneCopyStatus(text) {
+  const status = document.getElementById('copyMilestoneStatus');
+  if (!status) return;
+  status.textContent = text;
+  status.classList.add('visible');
+  clearTimeout(status._copyStatusTimer);
+  status._copyStatusTimer = setTimeout(() => {
+    status.textContent = '';
+    status.classList.remove('visible');
+  }, 2000);
 }
 
 function setActiveRoute(route) {
@@ -1683,6 +1992,56 @@ async function renderCustomers() {
             <button type="submit" class="btn-primary btn-lg form-action">Create Customer</button>
           </div>
         </form>
+      </div>
+
+      <div class="panel-section milestone-generator">
+        <div class="section-header">
+          <div>
+            <h3>Milestone Message Generator</h3>
+            <p>Generate personalized messages for birthdays or anniversaries.</p>
+          </div>
+        </div>
+        <div class="milestone-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="milestoneCustomerSelect">Select Customer(s)</label>
+              <select id="milestoneCustomerSelect" multiple size="6">
+                ${customers.map(c => `<option value="${c.id}" data-phone="${escapeHtml(c.phone||'')}">${escapeHtml(c.name)}${c.phone ? ` — ${escapeHtml(c.phone)}` : ''}</option>`).join('')}
+              </select>
+              <p class="form-help">Hold Ctrl/Cmd or Shift to select multiple customers.</p>
+            </div>
+            <div class="form-group">
+              <label>&nbsp;</label>
+              <div class="button-row">
+                <button id="generateBirthdayForSelected" class="btn">Generate Birthday message</button>
+                <button id="generateAnniversaryForSelected" class="btn">Generate Anniversary message</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label for="milestoneRecipients">Recipients (phones, comma separated)</label>
+              <input id="milestoneRecipients" class="form-control" placeholder="+2348012345678, +447712345678" />
+              <p class="form-help">Selected customers' phone numbers are auto-added here. You can also paste extra numbers.</p>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label for="milestoneMessagePreview">Message Preview</label>
+              <textarea id="milestoneMessagePreview" rows="4" class="form-control" placeholder="Generated message will appear here. Use #name to personalize per recipient."></textarea>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <button id="sendMilestoneForSelected" class="btn-primary">Send Generated Message</button>
+              <button id="copyMilestoneMessage" class="btn">Copy</button>
+              <span id="copyMilestoneStatus" class="copy-status"></span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="panel-section customer-list-section">
@@ -3212,14 +3571,40 @@ async function renderWhatsApp() {
     setButtonLoading(submitButton, true, 'Sending...');
     const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
     formData.useAI = formData.useAI === 'true';
-    const result = await API.whatsapp.send(formData);
-    if (result?.success) {
-      event.currentTarget.reset();
-      notify('WhatsApp message queued.');
-    } else {
-      notify(result?.message || 'Unable to send WhatsApp message.', 'error');
+    const recipients = parseRecipientString(formData.toPhone);
+    if (!recipients.length) {
+      notify('Please enter a recipient phone number.', 'error');
+      setButtonLoading(submitButton, false);
+      return;
     }
-    setButtonLoading(submitButton, false);
+
+    showConfirmationPreview(recipients, async () => {
+      const valid = recipients.filter(r => r.valid);
+      if (!valid.length) {
+        notify('No valid phone numbers to send to.', 'error');
+        setButtonLoading(submitButton, false);
+        return;
+      }
+
+      // send to first valid (single-form) or iterate if multiple provided
+      let anySuccess = false;
+      for (const rec of valid) {
+        const payload = { toPhone: rec.normalized, message: formData.message, useAI: formData.useAI };
+        const res = await API.whatsapp.send(payload);
+        if (res?.success) anySuccess = true;
+      }
+
+      if (anySuccess) {
+        event.currentTarget.reset();
+        notify('WhatsApp message queued.');
+      } else {
+        notify('Unable to send WhatsApp message.', 'error');
+      }
+      setButtonLoading(submitButton, false);
+    }, () => {
+      setButtonLoading(submitButton, false);
+      notify('Send cancelled.');
+    });
   });
 }
 

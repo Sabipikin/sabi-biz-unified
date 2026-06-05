@@ -35,6 +35,11 @@ router.post('/webhook', async (req, res, next) => {
 router.post('/send', authMiddleware, async (req, res, next) => {
   try {
     const { toPhone, message, useAI = false } = req.body;
+    // basic phone validation (E.164-like) - allow optional + and 7-15 digits
+    const normalized = String(toPhone || '').replace(/[^0-9+]/g, '');
+    if (!/^\+?[1-9][0-9]{6,14}$/.test(normalized)) {
+      return res.status(400).json({ success: false, message: 'Invalid phone number format.' });
+    }
     const result = await whatsappService.sendMessage(req.user.userId, toPhone, message, useAI);
     return res.json({ success: true, data: result });
   } catch (err) {

@@ -628,6 +628,19 @@ html, body {
   min-width: 140px;
 }
 
+.copy-status {
+  align-self: center;
+  color: var(--primary);
+  font-size: 0.95rem;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.copy-status.visible {
+  opacity: 1;
+}
+
 .wide-select {
   width: 100%;
 }
