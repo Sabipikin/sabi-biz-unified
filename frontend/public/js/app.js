@@ -2371,8 +2371,9 @@ async function renderInventory() {
         </div>
         <button type="submit" class="btn-primary form-action">Add Item</button>
       </form>
-      ${error ? renderSectionError(error) : ''}
-      ${renderInventoryTable(items)}
+      ${error ? renderSectionError(error) + `
+        <div class="panel-actions"><button id="retryInventory" class="btn">Retry</button></div>
+      ` : renderInventoryTable(items)}
     </div>
   `;
 
@@ -2411,6 +2412,11 @@ async function renderInventory() {
     } else {
       notify(response?.message || 'Unable to add inventory item.', 'error');
     }
+  });
+
+  // Retry button when inventory load fails
+  document.getElementById('retryInventory')?.addEventListener('click', async () => {
+    await renderInventory();
   });
 }
 
