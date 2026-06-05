@@ -30,3 +30,26 @@ window.SABIBIZ_INITIAL_ROUTE = '${escapedInitialRoute}';
 
 fs.writeFileSync(outputPath, content, 'utf8');
 console.log(`Wrote public/env.js with API base URL: ${apiBaseUrl}`);
+
+// Also write a small build/version file to enable cache-busting for env.js
+try {
+  const child = require('child_process');
+  const pkg = require(path.join(__dirname, '..', 'package.json'));
+  let gitHash = '';
+  try {
+    gitHash = child.execSync('git rev-parse --short HEAD').toString().trim();
+  } catch (e) {
+    gitHash = '';
+  }
+  const buildStamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const buildVersion = pkg && pkg.version ? `${pkg.version}${gitHash ? `+${gitHash}` : ''}` : buildStamp;
+  const versionPath = path.join(__dirname, '..', 'public', 'env.version.js');
+  const versionContent = `// Frontend build/version
+window.SABIBIZ_BUILD = ${JSON.stringify(buildVersion)};
+window.SABIBIZ_BUILD_TIMESTAMP = ${JSON.stringify(buildStamp)};
+`;
+  fs.writeFileSync(versionPath, versionContent, 'utf8');
+  console.log(`Wrote public/env.version.js with build ${buildVersion}`);
+} catch (err) {
+  console.warn('Could not write env.version.js for cache-busting:', err && err.message);
+}

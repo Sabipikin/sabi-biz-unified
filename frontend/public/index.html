@@ -64,7 +64,16 @@
     }
   </script>
 
-  <script src="./env.js"></script>
+  <script src="./env.version.js"></script>
+  <script>
+    (function () {
+      var v = window.SABIBIZ_BUILD || Date.now();
+      var s = document.createElement('script');
+      s.src = './env.js?v=' + encodeURIComponent(v);
+      s.async = false;
+      document.head.appendChild(s);
+    })();
+  </script>
   <script src="./js/app.js"></script>
 </body>
 </html>
