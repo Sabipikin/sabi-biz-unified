@@ -136,18 +136,36 @@ async function getUserMilestoneTemplates(userId) {
   const anniversaryDefault = getDefaultMilestoneTemplate('anniversary');
   const businessDefault = 'Your business';
 
-  const selectColumns = [
-    hasBirthdayTemplate ? 'birthday_message_template' : '$2::text AS birthday_message_template',
-    hasAnniversaryTemplate ? 'anniversary_message_template' : '$3::text AS anniversary_message_template',
-    hasShopName ? 'shop_name' : '$4::text AS shop_name',
-  ].join(', ');
+  const values = [userId];
+  const selectColumns = [];
+
+  if (hasBirthdayTemplate) {
+    selectColumns.push('birthday_message_template');
+  } else {
+    values.push(birthdayDefault);
+    selectColumns.push(`$${values.length}::text AS birthday_message_template`);
+  }
+
+  if (hasAnniversaryTemplate) {
+    selectColumns.push('anniversary_message_template');
+  } else {
+    values.push(anniversaryDefault);
+    selectColumns.push(`$${values.length}::text AS anniversary_message_template`);
+  }
+
+  if (hasShopName) {
+    selectColumns.push('shop_name');
+  } else {
+    values.push(businessDefault);
+    selectColumns.push(`$${values.length}::text AS shop_name`);
+  }
 
   const result = await query(
-    `SELECT ${selectColumns}
+    `SELECT ${selectColumns.join(', ')}
      FROM users
      WHERE id = $1
      LIMIT 1`,
-    [userId, birthdayDefault, anniversaryDefault, businessDefault]
+    values
   );
 
   const userRow = result.rows[0] || {};
