@@ -2317,6 +2317,21 @@ async function renderCustomerDetail(customerId) {
 }
 
 async function renderInventory() {
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Inventory</h2>
+          <p>Loading inventory...</p>
+        </div>
+      </div>
+      <div class="inventory-loading">
+        <div class="spinner"></div>
+        <p>Fetching inventory items…</p>
+      </div>
+    </div>
+  `;
+
   const response = await API.business.inventory();
   const items = getResponseData(response);
   const error = getResponseError(response, 'Inventory could not be loaded.');
@@ -2361,67 +2376,79 @@ async function renderInventory() {
     </div>
   `;
 
-  document.getElementById('customerDetailForm')?.addEventListener('submit', async (event) => {
+  document.getElementById('inventoryForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
 
     clearFieldErrors(form);
-    const validation = validateCustomerForm(form);
-    if (!validation.ok) {
+    const payload = {
+      product_name: form.product_name.value.trim(),
+      quantity: Number(form.quantity.value || 0),
+      unit_price: Number(form.unit_price.value || 0),
+      cost_price: Number(form.cost_price.value || 0),
+      reorder_level: Number(form.reorder_level.value || 10),
+      supplier: form.supplier.value.trim() || null,
+    };
+
+    if (!payload.product_name) {
+      setFieldError(form.product_name, 'Product name is required.');
       notify('Please fix the highlighted fields.', 'error');
-      const firstError = form.querySelector('.input-error');
-      if (firstError) firstError.focus();
+      form.product_name.focus();
       return;
     }
 
     const submitButton = form.querySelector('button[type="submit"]');
     setButtonLoading(submitButton, true, 'Saving...');
-    showEditSpinner(true);
-    const payload = validation.data;
-    payload.auto_birthday = document.getElementById('detailCustomerAutoBirthday').checked;
-    payload.auto_anniversary = document.getElementById('detailCustomerAutoAnniversary').checked;
+    const response = await API.business.createInventoryItem(payload);
+    setButtonLoading(submitButton, false);
 
-    // Optimistic UI update: apply changes immediately to the view
-    const prevState = { ...customer };
-    const optimisticCustomer = Object.assign({}, customer, {
-      ...payload,
-      auto_birthday: !!payload.auto_birthday,
-      auto_anniversary: !!payload.auto_anniversary,
-    });
-
-    const viewEl = document.getElementById('customerView');
-    const renderView = (c) => {
-      if (!viewEl) return;
-      viewEl.innerHTML = `
-        <h3>${escapeHtml(c.name)}</h3>
-        <p>${escapeHtml(c.email || c.phone || 'No contact details')}</p>
-        <p>${escapeHtml(c.delivery_address || 'No delivery address')}</p>
-        <p>${escapeHtml(c.city || '-')}, ${escapeHtml(c.region || '-')}</p>
-        <p>Birthday: ${c.birthday ? formatDate(c.birthday) : '-'}</p>
-        <p>Anniversary: ${c.anniversary ? formatDate(c.anniversary) : '-'}</p>
-        <p>Auto birthday messages: ${c.auto_birthday ? 'Enabled' : 'Disabled'}</p>
-        <p>Auto anniversary messages: ${c.auto_anniversary ? 'Enabled' : 'Disabled'}</p>
-      `;
-    };
-
-    // apply optimistic render
-    renderView(optimisticCustomer);
-
-    // send update to server
-    const updateResponse = await API.business.updateCustomer(customerId, payload);
-    showEditSpinner(false);
-    const updatedCustomer = getResponseData(updateResponse, null);
-    if (updatedCustomer) {
-      notify('Customer updated successfully.');
-      // refresh from server to ensure consistency
-      await renderCustomerDetail(customerId);
+    const item = getResponseData(response, null);
+    if (item) {
+      notify('Inventory item added successfully.');
+      form.reset();
+      form.reorder_level.value = '10';
+      await renderInventory();
     } else {
-      // rollback optimistic update
-      notify(updateResponse?.message || 'Unable to update customer.', 'error');
-      renderView(prevState);
-      setButtonLoading(submitButton, false);
+      notify(response?.message || 'Unable to add inventory item.', 'error');
     }
   });
+}
+
+function renderInventoryTable(items) {
+  if (!items || !items.length) {
+    return '<div class="empty-state">No inventory items yet. Add a new stock item above.</div>';
+  }
+
+  return `
+    <div class="table-wrap inventory-table-wrap">
+      <table class="data-table inventory-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Qty</th>
+            <th>Unit Price</th>
+            <th>Cost Price</th>
+            <th>Reorder Level</th>
+            <th>Supplier</th>
+            <th>Added</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map(item => `
+            <tr>
+              <td>${escapeHtml(item.product_name)}</td>
+              <td>${Number(item.quantity)}</td>
+              <td>${formatMoney(item.unit_price)}</td>
+              <td>${formatMoney(item.cost_price)}</td>
+              <td>${item.reorder_level != null ? escapeHtml(String(item.reorder_level)) : '-'}</td>
+              <td>${escapeHtml(item.supplier || '-')}</td>
+              <td>${formatExactDate(item.created_at)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 async function renderSales() {

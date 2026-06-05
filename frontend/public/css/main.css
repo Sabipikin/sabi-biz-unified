@@ -1121,6 +1121,21 @@ html, body {
   to { transform: rotate(360deg); }
 }
 
+.inventory-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  gap: 12px;
+  color: var(--text);
+}
+
+.inventory-loading .spinner {
+  border-color: rgba(0, 0, 0, 0.1);
+  border-top-color: var(--primary);
+}
+
 /* ─── INVOICE FORM ─────────────────────────────────────────────────────── */
 .invoice-form {
   display: flex;
