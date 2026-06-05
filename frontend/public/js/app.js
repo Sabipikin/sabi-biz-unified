@@ -24,6 +24,7 @@ const API_BASE = resolveApiBaseUrl();
 const app = document.getElementById('app');
 const defaultRoute = '#/dashboard';
 const pendingRouteKey = 'SABIBIZ_PENDING_ROUTE';
+const sidebarStateKey = 'SABIBIZ_SIDEBAR_COLLAPSED';
 const dashboardRoutes = new Set([
   'dashboard',
   'sales',
@@ -189,6 +190,48 @@ function logout() {
   localStorage.removeItem('token');
   window.location.hash = '#/login';
   renderApp();
+}
+
+function isSidebarCollapsed() {
+  return localStorage.getItem(sidebarStateKey) === 'true';
+}
+
+function setSidebarCollapsed(collapsed) {
+  localStorage.setItem(sidebarStateKey, collapsed ? 'true' : 'false');
+  document.querySelector('.dashboard')?.classList.toggle('sidebar-collapsed', collapsed);
+
+  const button = document.getElementById('sidebarCollapse');
+  if (button) {
+    button.setAttribute('aria-expanded', String(!collapsed));
+    button.setAttribute('aria-label', collapsed ? 'Expand menu' : 'Collapse menu');
+    button.title = collapsed ? 'Expand menu' : 'Collapse menu';
+  }
+}
+
+function applyNavIconLabels() {
+  const labels = {
+    dashboard: 'D',
+    invoices: 'I',
+    inventory: 'N',
+    sales: 'S',
+    customers: 'C',
+    whatsapp: 'W',
+    subscriptions: 'P',
+    settings: 'G',
+  };
+
+  document.querySelectorAll('.nav-item[data-route]').forEach(item => {
+    const icon = item.querySelector('.nav-icon');
+    const label = labels[item.dataset.route];
+    if (icon && label) {
+      icon.textContent = label;
+    }
+  });
+
+  const logoutIcon = document.querySelector('#logoutButton .nav-icon');
+  if (logoutIcon) {
+    logoutIcon.textContent = 'L';
+  }
 }
 
 function normalizeRouteName(route) {
@@ -548,7 +591,9 @@ function renderApp() {
   }
 
   if (isLoggedIn()) {
-    renderDashboardShell();
+    if (!document.querySelector('.dashboard')) {
+      renderDashboardShell();
+    }
     navigateDashboard(page);
   } else if (dashboardRoutes.has(page)) {
     localStorage.setItem(pendingRouteKey, getRouteHash(page));
@@ -563,16 +608,20 @@ function renderApp() {
 }
 
 function renderDashboardShell() {
+  const collapsed = isSidebarCollapsed();
   app.innerHTML = `
-    <div class="dashboard">
-      <nav class="navbar">
+    <div class="dashboard ${collapsed ? 'sidebar-collapsed' : ''}">
+      <nav class="navbar" aria-label="Primary navigation">
         <div class="navbar-brand">
-          <button type="button" id="navToggle" class="nav-toggle" aria-label="Toggle menu">
+          <button type="button" id="navToggle" class="nav-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="navbarMenu">
             <span></span>
             <span></span>
             <span></span>
           </button>
-          <h1>SabiBiz</h1>
+          <h1><span class="brand-mark">S</span><span class="brand-text">SabiBiz</span></h1>
+          <button type="button" id="sidebarCollapse" class="sidebar-collapse" aria-controls="navbarMenu" aria-expanded="${String(!collapsed)}" aria-label="${collapsed ? 'Expand menu' : 'Collapse menu'}" title="${collapsed ? 'Expand menu' : 'Collapse menu'}">
+            <span aria-hidden="true"></span>
+          </button>
         </div>
         <div class="navbar-menu" id="navbarMenu">
           <a href="#/dashboard" data-route="dashboard" class="nav-item">
@@ -623,20 +672,29 @@ function renderDashboardShell() {
 
   const navToggle = document.getElementById('navToggle');
   const navbarMenu = document.getElementById('navbarMenu');
+  const sidebarCollapse = document.getElementById('sidebarCollapse');
+  applyNavIconLabels();
   
   navToggle?.addEventListener('click', () => {
-    navbarMenu?.classList.toggle('active');
-    navToggle.classList.toggle('active');
+    const isOpen = navbarMenu?.classList.toggle('active') || false;
+    navToggle.classList.toggle('active', isOpen);
+    navToggle.setAttribute('aria-expanded', String(isOpen));
+  });
+
+  sidebarCollapse?.addEventListener('click', () => {
+    setSidebarCollapsed(!document.querySelector('.dashboard')?.classList.contains('sidebar-collapsed'));
   });
 
   navbarMenu?.addEventListener('click', (e) => {
     if (e.target.closest('a') && !e.target.closest('.nav-toggle')) {
       navbarMenu.classList.remove('active');
       navToggle?.classList.remove('active');
+      navToggle?.setAttribute('aria-expanded', 'false');
     }
   });
 
   document.getElementById('logoutButton').addEventListener('click', logout);
+  setSidebarCollapsed(collapsed);
 }
 
 function setActiveRoute(route) {
