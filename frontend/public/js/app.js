@@ -143,6 +143,10 @@ const API = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+    createBulkSales: (data) => API.request('/api/business/sales/bulk', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
     salesAnalytics: () => API.request('/api/business/sales/analytics'),
     customersAnalytics: () => API.request('/api/business/customers/analytics'),
   },
@@ -2328,18 +2332,21 @@ async function renderInventory() {
 }
 
 async function renderSales() {
-  const [inventoryRes, salesRes, analyticsRes] = await Promise.all([
+  const [inventoryRes, customersRes, salesRes, analyticsRes] = await Promise.all([
     API.business.inventory(),
+    API.business.customers(),
     API.business.sales(),
     API.business.salesAnalytics(),
   ]);
 
-  const inventory = getResponseData(inventoryRes);
-  const sales = getResponseData(salesRes);
+  const inventory = getResponseData(inventoryRes, []);
+  const customers = getResponseData(customersRes, []);
+  const sales = getResponseData(salesRes, []);
   const analytics = getResponseData(analyticsRes, {});
 
   const errors = [
     getResponseError(inventoryRes, 'Inventory could not be loaded.'),
+    getResponseError(customersRes, 'Customers could not be loaded.'),
     getResponseError(salesRes, 'Sales could not be loaded.'),
     getResponseError(analyticsRes, 'Sales analytics could not be loaded.'),
   ].filter(Boolean);
@@ -2349,129 +2356,350 @@ async function renderSales() {
       <div class="panel-header">
         <div>
           <h2>Sales</h2>
-          <p>Record daily sales and review the performance of your products.</p>
+          <p>Record sales, track inventory impact, and monitor profit/loss performance.</p>
         </div>
       </div>
       ${errors.length ? renderSectionError(errors.join(' ')) : ''}
-      <div class="sales-layout">
-        <div class="sales-form-panel">
-          <form id="salesForm" class="form-grid">
+
+      <div class="sales-analytics-strip">
+        <div class="stat-card compact">
+          <h4>Total Revenue</h4>
+          <p class="stat-number">${formatMoney(analytics.total_sales || 0)}</p>
+        </div>
+        <div class="stat-card compact">
+          <h4>Total Profit</h4>
+          <p class="stat-number">${formatMoney(analytics.total_profit || 0)}</p>
+        </div>
+        <div class="stat-card compact">
+          <h4>Total Loss</h4>
+          <p class="stat-number">${formatMoney(analytics.total_loss || 0)}</p>
+        </div>
+        <div class="stat-card compact">
+          <h4>Avg Margin</h4>
+          <p class="stat-number">${analytics.avg_margin != null ? analytics.avg_margin.toFixed(1) + '%' : '-'}</p>
+        </div>
+        <div class="stat-card compact">
+          <h4>Top Product</h4>
+          <p class="stat-number">${escapeHtml(analytics.top_product || '-')}</p>
+        </div>
+      </div>
+
+      <div class="sales-form-container">
+        <h3>Record New Sale</h3>
+        <form id="salesForm" class="sales-form-modern">
+          <div class="form-section">
+            <h4>Customer Information (Optional)</h4>
+            <div class="customer-selector" id="customerSelector">
+              <div class="form-group">
+                <label for="saleCustomer">Select or Create Customer</label>
+                <select id="saleCustomer" name="customer_id">
+                  <option value="">No customer (Cash sale)</option>
+                  ${customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}${c.phone ? ` — ${c.phone}` : ''}</option>`).join('')}
+                  <option value="__new__">+ Create new customer</option>
+                </select>
+              </div>
+              <div id="newCustomerForm" style="display:none">
+                <div class="form-group">
+                  <label for="newCustomerName">Customer Name</label>
+                  <input id="newCustomerName" type="text" placeholder="Full name">
+                </div>
+                <div class="form-group">
+                  <label for="newCustomerPhone">Phone</label>
+                  <input id="newCustomerPhone" type="tel" placeholder="+234...">
+                </div>
+                <button type="button" id="cancelNewCustomer" class="btn secondary small">Cancel</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h4>Sale Date</h4>
             <div class="form-group">
-              <label for="saleProduct">Product</label>
-              <select id="saleProduct" name="inventory_id" required>
+              <label for="saleDateInput">Date</label>
+              <input id="saleDateInput" name="sale_date" type="date" value="${new Date().toISOString().slice(0, 10)}" required>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h4>Products (Add one or more)</h4>
+            <div id="productsContainer" class="products-container"></div>
+            <button type="button" id="addProductButton" class="btn secondary">+ Add Product</button>
+          </div>
+
+          <div class="form-section form-actions">
+            <button type="submit" class="btn-primary">Record Sale</button>
+            <button type="button" id="resetSalesForm" class="btn secondary">Reset</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="sales-history-section">
+        <h3>Sales History</h3>
+        ${renderSalesHistoryCards(sales)}
+      </div>
+    </div>
+  `;
+
+  let productIndex = 0;
+  const productsContainer = document.getElementById('productsContainer');
+  const saleCustomerSelect = document.getElementById('saleCustomer');
+  const newCustomerForm = document.getElementById('newCustomerForm');
+  const salesForm = document.getElementById('salesForm');
+
+  function renderProductCard(index) {
+    const inventoryOptions = inventory.map(item => `
+      <option value="${item.id}" 
+        data-unit-price="${item.unit_price || 0}"
+        data-cost-price="${item.cost_price || 0}"
+        data-available="${item.quantity || 0}">
+        ${escapeHtml(item.product_name || '-')} (Qty: ${item.quantity || 0})
+      </option>
+    `).join('');
+
+    return `
+      <div class="product-card" data-product-index="${index}">
+        <div class="card-header">
+          <h5>Product ${index + 1}</h5>
+          <button type="button" class="btn-remove-product" data-index="${index}">Remove</button>
+        </div>
+        <div class="card-content">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="product_${index}">Product</label>
+              <select name="product_${index}" class="product-select" data-index="${index}">
                 <option value="">Select product</option>
-                ${inventory.map(item => `
-                  <option value="${item.id}"
-                    data-unit-price="${item.unit_price || 0}"
-                    data-cost-price="${item.cost_price || 0}">
-                    ${escapeHtml(item.product_name || '-')}
-                  </option>
-                `).join('')}
+                ${inventoryOptions}
               </select>
             </div>
             <div class="form-group">
-              <label for="saleDate">Sale Date</label>
-              <input id="saleDate" name="sale_date" type="date" value="${new Date().toISOString().slice(0, 10)}" required>
+              <label for="quantity_${index}">Quantity</label>
+              <input type="number" name="quantity_${index}" class="quantity-input" data-index="${index}" min="1" value="1" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="unitPrice_${index}">Unit Price (₦)</label>
+              <input type="number" name="unitPrice_${index}" class="unit-price-input" data-index="${index}" step="0.01" min="0" required>
             </div>
             <div class="form-group">
-              <label for="saleUnit">Unit</label>
-              <input id="saleUnit" name="unit" required placeholder="pcs, kg, bundle">
+              <label for="costPrice_${index}">Cost Price (₦)</label>
+              <input type="number" name="costPrice_${index}" class="cost-price-input" data-index="${index}" step="0.01" min="0">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="bonus_${index}">Bonus/Adjustment (₦)</label>
+              <input type="number" name="bonus_${index}" class="bonus-input" data-index="${index}" step="0.01" value="0">
             </div>
             <div class="form-group">
-              <label for="saleQuantity">Quantity</label>
-              <input id="saleQuantity" name="quantity" type="number" min="1" value="1" required>
+              <label for="reason_${index}">Reason (optional)</label>
+              <input type="text" name="reason_${index}" class="reason-input" data-index="${index}" placeholder="e.g., bulk discount, damage">
             </div>
-            <div class="form-group">
-              <label for="saleUnitPrice">Unit Price</label>
-              <input id="saleUnitPrice" name="unit_price" type="number" min="0" step="0.01" required>
+          </div>
+          <div class="product-summary">
+            <div class="summary-line">
+              <span>Subtotal:</span>
+              <span class="subtotal-${index}">₦0.00</span>
             </div>
-            <div class="form-group">
-              <label for="saleCostPrice">Cost Price</label>
-              <input id="saleCostPrice" name="cost_price" type="number" min="0" step="0.01">
-            </div>
-            <div class="form-group">
-              <label for="saleTotal">Total Amount</label>
-              <input id="saleTotal" name="total_amount" type="number" min="0" step="0.01" required>
-            </div>
-            <button type="submit" class="btn-primary form-action">Record Sale</button>
-          </form>
-        </div>
-
-        <div class="sales-summary-panel">
-          <h3>Sales Analytics</h3>
-          <div class="stats">
-            <div class="stat-card">
-              <h4>Total Revenue</h4>
-              <p class="stat-number">${formatMoney(analytics.total_sales)}</p>
-            </div>
-            <div class="stat-card">
-              <h4>Total Profit</h4>
-              <p class="stat-number">${formatMoney(analytics.total_profit)}</p>
-            </div>
-            <div class="stat-card">
-              <h4>Avg Margin</h4>
-              <p class="stat-number">${analytics.avg_margin != null ? `${analytics.avg_margin.toFixed(2)}%` : '-'}</p>
-            </div>
-            <div class="stat-card">
-              <h4>Total Loss</h4>
-              <p class="stat-number">${formatMoney(analytics.total_loss)}</p>
-            </div>
-            <div class="stat-card">
-              <h4>Best Product</h4>
-              <p class="stat-number">${escapeHtml(analytics.top_product || '-')}</p>
-            </div>
-            <div class="stat-card">
-              <h4>Top Sale Time</h4>
-              <p class="stat-number">${escapeHtml(analytics.highest_sale_time || '-')}</p>
+            <div class="summary-line">
+              <span>Profit/Loss:</span>
+              <span class="profit-${index}">₦0.00</span>
             </div>
           </div>
         </div>
       </div>
+    `;
+  }
 
-      ${renderSalesTable(sales)}
-    </div>
-  `;
+  function attachProductListeners(index) {
+    const productSelect = document.querySelector(`[name="product_${index}"]`);
+    const quantityInput = document.querySelector(`[name="quantity_${index}"]`);
+    const unitPriceInput = document.querySelector(`[name="unitPrice_${index}"]`);
+    const costPriceInput = document.querySelector(`[name="costPrice_${index}"]`);
 
-  const saleProduct = document.getElementById('saleProduct');
-  const saleQuantity = document.getElementById('saleQuantity');
-  const saleUnitPrice = document.getElementById('saleUnitPrice');
-  const saleCostPrice = document.getElementById('saleCostPrice');
-  const saleTotal = document.getElementById('saleTotal');
+    const updateSummary = () => {
+      const qty = Number(quantityInput?.value || 0);
+      const unitPrice = Number(unitPriceInput?.value || 0);
+      const costPrice = Number(costPriceInput?.value || 0);
+      const bonus = Number(document.querySelector(`[name="bonus_${index}"]`)?.value || 0);
 
-  const syncSaleTotal = () => {
-    const quantity = Number(saleQuantity?.value || 0);
-    const unitPrice = Number(saleUnitPrice?.value || 0);
-    saleTotal.value = (quantity * unitPrice).toFixed(2);
-  };
+      const subtotal = qty * unitPrice;
+      const profit = (qty * (unitPrice - costPrice)) + bonus;
 
-  saleProduct?.addEventListener('change', () => {
-    const selectedOption = saleProduct.selectedOptions[0];
-    if (!selectedOption) return;
-    saleUnitPrice.value = selectedOption.dataset.unitPrice || '';
-    saleCostPrice.value = selectedOption.dataset.costPrice || '';
-    syncSaleTotal();
+      const subtotalEl = document.querySelector(`.subtotal-${index}`);
+      const profitEl = document.querySelector(`.profit-${index}`);
+      if (subtotalEl) subtotalEl.textContent = formatMoney(subtotal);
+      if (profitEl) profitEl.textContent = formatMoney(profit);
+    };
+
+    productSelect?.addEventListener('change', () => {
+      const option = productSelect.selectedOptions[0];
+      if (unitPriceInput) unitPriceInput.value = option?.dataset.unitPrice || '';
+      if (costPriceInput) costPriceInput.value = option?.dataset.costPrice || '';
+      updateSummary();
+    });
+
+    quantityInput?.addEventListener('input', updateSummary);
+    unitPriceInput?.addEventListener('input', updateSummary);
+    costPriceInput?.addEventListener('input', updateSummary);
+    document.querySelector(`[name="bonus_${index}"]`)?.addEventListener('input', updateSummary);
+
+    document.querySelector(`[data-index="${index}"] .btn-remove-product`)?.addEventListener('click', (e) => {
+      e.preventDefault();
+      document.querySelector(`[data-product-index="${index}"]`)?.remove();
+    });
+  }
+
+  function addProductCard() {
+    const card = document.createElement('div');
+    card.innerHTML = renderProductCard(productIndex);
+    productsContainer.appendChild(card.firstElementChild);
+    attachProductListeners(productIndex);
+    productIndex++;
+  }
+
+  document.getElementById('addProductButton')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    addProductCard();
   });
 
-  saleQuantity?.addEventListener('input', syncSaleTotal);
-  saleUnitPrice?.addEventListener('input', syncSaleTotal);
+  document.getElementById('resetSalesForm')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    salesForm.reset();
+    productsContainer.innerHTML = '';
+    productIndex = 0;
+    saleCustomerSelect.value = '';
+    newCustomerForm.style.display = 'none';
+  });
 
-  document.getElementById('salesForm').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
-    formData.quantity = Number(formData.quantity || 0);
-    formData.unit_price = Number(formData.unit_price || 0);
-    formData.cost_price = Number(formData.cost_price || 0);
-    formData.total_amount = Number(formData.total_amount || (formData.quantity * formData.unit_price));
+  saleCustomerSelect?.addEventListener('change', () => {
+    if (saleCustomerSelect.value === '__new__') {
+      newCustomerForm.style.display = 'block';
+      saleCustomerSelect.value = '';
+    } else {
+      newCustomerForm.style.display = 'none';
+    }
+  });
 
-    const result = await API.business.createSale(formData);
+  document.getElementById('cancelNewCustomer')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    newCustomerForm.style.display = 'none';
+    saleCustomerSelect.value = '';
+  });
+
+  // Add initial product card
+  addProductCard();
+
+  salesForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const productCards = productsContainer.querySelectorAll('.product-card');
+    if (productCards.length === 0) {
+      notify('Add at least one product to record a sale.', 'error');
+      return;
+    }
+
+    const products = [];
+    let valid = true;
+
+    productCards.forEach((card, idx) => {
+      const productId = card.querySelector(`[name="product_${idx}"]`)?.value;
+      const qty = Number(card.querySelector(`[name="quantity_${idx}"]`)?.value || 0);
+      const unitPrice = Number(card.querySelector(`[name="unitPrice_${idx}"]`)?.value || 0);
+      const costPrice = Number(card.querySelector(`[name="costPrice_${idx}"]`)?.value || 0);
+      const bonus = Number(card.querySelector(`[name="bonus_${idx}"]`)?.value || 0);
+      const reason = card.querySelector(`[name="reason_${idx}"]`)?.value || '';
+
+      if (!productId || qty <= 0 || unitPrice <= 0) {
+        valid = false;
+        return;
+      }
+
+      products.push({
+        inventoryId: productId,
+        quantity: qty,
+        unitPrice,
+        costPrice,
+        bonusAdjustment: bonus,
+        adjustmentReason: reason,
+      });
+    });
+
+    if (!valid) {
+      notify('Please fill in all required fields correctly.', 'error');
+      return;
+    }
+
+    // Check if creating new customer
+    let customerId = saleCustomerSelect.value;
+    if (!customerId && newCustomerForm.style.display !== 'none') {
+      const newName = document.getElementById('newCustomerName')?.value.trim();
+      const newPhone = document.getElementById('newCustomerPhone')?.value.trim();
+      if (newName) {
+        const newCustomerRes = await API.business.createCustomer({
+          name: newName,
+          phone: newPhone || null,
+        });
+        const newCustomerData = getResponseData(newCustomerRes, null);
+        if (newCustomerData) {
+          customerId = newCustomerData.id;
+        }
+      }
+    }
+
+    const salesData = {
+      customerId: customerId || null,
+      saleDate: document.getElementById('saleDateInput')?.value,
+      products,
+    };
+
+    const result = await API.business.createBulkSales(salesData);
     if (result?.success) {
-      notify('Sale recorded successfully.');
+      notify('Sales recorded successfully.');
       await renderSales();
     } else {
-      notify(result?.message || 'Unable to record sale.', 'error');
+      notify(result?.message || 'Unable to record sales.', 'error');
     }
   });
 }
+
+function renderSalesHistoryCards(sales) {
+  if (!sales || sales.length === 0) {
+    return '<div class="empty-state">No sales recorded yet.</div>';
+  }
+
+  const cardsHtml = sales.slice(0, 20).map(sale => `
+    <div class="sales-card">
+      <div class="card-header">
+        <h5>${escapeHtml(sale.product_name || '-')}</h5>
+        <span class="card-date">${formatDate(sale.sale_date || sale.sale_time)}</span>
+      </div>
+      <div class="card-body">
+        <div class="card-row">
+          <span class="label">Qty:</span>
+          <span class="value">${Number(sale.quantity || 0)}</span>
+        </div>
+        <div class="card-row">
+          <span class="label">Unit Price:</span>
+          <span class="value">${formatMoney(sale.unit_price)}</span>
+        </div>
+        <div class="card-row">
+          <span class="label">Total:</span>
+          <span class="value">${formatMoney(sale.total_amount)}</span>
+        </div>
+        <div class="card-row profit-row ${Number(sale.profit || 0) >= 0 ? 'profitable' : 'loss'}">
+          <span class="label">Profit/Loss:</span>
+          <span class="value">${formatMoney(sale.profit)}</span>
+        </div>
+        ${sale.bonus_adjustment ? `<div class="card-row"><span class="label">Adjustment:</span><span class="value">${formatMoney(sale.bonus_adjustment)}</span></div>` : ''}
+        ${sale.customer_id ? `<div class="card-row"><span class="label">Customer:</span><span class="value">Linked</span></div>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  return `<div class="sales-cards-grid">${cardsHtml}</div>`;
+}
+
 
 function renderSalesTable(sales) {
   if (!sales.length) {

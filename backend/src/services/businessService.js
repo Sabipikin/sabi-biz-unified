@@ -916,7 +916,23 @@ class BusinessService {
 
       await client.query(updateQuery, updateValues);
 
+      // Auto-record sales if invoice status is being changed to "paid"
+      const oldStatus = existing.rows[0].status;
+      const newStatus = invoice.status || 'draft';
+      const shouldAutoRecord = oldStatus !== 'paid' && newStatus === 'paid';
+
       await client.query('COMMIT');
+      client.release();
+
+      if (shouldAutoRecord) {
+        try {
+          await this.autoRecordSalesFromInvoice(userId, invoiceId);
+          logger.info(`Auto-recorded sales from invoice ${invoiceId}`);
+        } catch (err) {
+          logger.warn(`Failed to auto-record sales from invoice ${invoiceId}:`, err.message);
+          // Don't fail the update if auto-recording fails
+        }
+      }
       return this.getInvoiceById(userId, invoiceId);
     } catch (err) {
       await client.query('ROLLBACK');
@@ -1317,7 +1333,10 @@ class BusinessService {
       let unitPrice = Number(sale.unit_price || 0);
       let costPrice = Number(sale.cost_price || 0);
       const totalAmount = Number(sale.total_amount || unitPrice * quantity);
-      const profit = Number((unitPrice - costPrice) * quantity);
+      const bonusAdjustment = Number(sale.bonus_adjustment || 0);
+      const profit = Number((unitPrice - costPrice) * quantity) + bonusAdjustment;
+      const customerId = sale.customer_id || null;
+      const invoiceId = sale.invoice_id || null;
 
       if (inventoryId) {
         const productResult = await client.query(
@@ -1345,23 +1364,30 @@ class BusinessService {
 
       const result = await client.query(
         `INSERT INTO sales (
-           user_id, inventory_id, product_name, unit, quantity, sale_date, sale_time,
-           unit_price, cost_price, total_amount, profit, created_at, updated_at
+           user_id, inventory_id, product_name, quantity, sale_date, sale_time,
+           unit_price, cost_price, total_amount, profit, customer_id, 
+           bonus_adjustment, adjustment_reason, invoice_id, auto_recorded,
+           created_at, updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9, $10, NOW(), NOW())
-         RETURNING id, inventory_id, product_name, unit, quantity, sale_date, sale_time,
-                   unit_price, cost_price, total_amount, profit, created_at`,
+         VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+         RETURNING id, inventory_id, product_name, quantity, sale_date, sale_time,
+                   unit_price, cost_price, total_amount, profit, customer_id,
+                   bonus_adjustment, adjustment_reason, invoice_id, auto_recorded, created_at`,
         [
           userId,
           inventoryId,
           productName,
-          sale.unit || null,
           quantity,
           saleDate,
           unitPrice,
           costPrice,
           totalAmount,
           profit,
+          customerId,
+          bonusAdjustment,
+          sale.adjustment_reason || null,
+          invoiceId,
+          sale.auto_recorded || false,
         ]
       );
 
@@ -1372,6 +1398,142 @@ class BusinessService {
       throw err;
     } finally {
       client.release();
+    }
+  }
+
+  async createBulkSales(userId, salesBatch) {
+    // Expects array of sales with same customer but different products
+    // salesBatch structure: { customerId, saleDate, products: [{ inventoryId, quantity, unitPrice, costPrice, bonusAdjustment, adjustmentReason }] }
+    if (!Array.isArray(salesBatch) || !salesBatch.products || salesBatch.products.length === 0) {
+      throw new Error('Invalid bulk sales format');
+    }
+
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      const customerId = salesBatch.customerId || null;
+      const saleDate = salesBatch.saleDate || new Date().toISOString().slice(0, 10);
+      const invoiceId = salesBatch.invoiceId || null;
+      const autoRecorded = salesBatch.autoRecorded || false;
+      const results = [];
+
+      for (const product of salesBatch.products) {
+        const quantity = Number(product.quantity || 0);
+        if (quantity <= 0) continue;
+
+        let inventoryId = product.inventoryId || null;
+        let productName = product.productName || '';
+        let unitPrice = Number(product.unitPrice || 0);
+        let costPrice = Number(product.costPrice || 0);
+        const bonusAdjustment = Number(product.bonusAdjustment || 0);
+        const totalAmount = Number(quantity * unitPrice);
+        const profit = Number((unitPrice - costPrice) * quantity) + bonusAdjustment;
+
+        if (inventoryId) {
+          const productResult = await client.query(
+            `SELECT id, product_name, quantity, unit_price, cost_price
+             FROM inventory
+             WHERE id = $1 AND user_id = $2`,
+            [inventoryId, userId]
+          );
+
+          if (productResult.rows.length) {
+            const invItem = productResult.rows[0];
+            productName = productName || invItem.product_name;
+            unitPrice = Number(unitPrice || invItem.unit_price || 0);
+            costPrice = Number(costPrice || invItem.cost_price || 0);
+
+            const updatedQuantity = Math.max(0, Number(invItem.quantity || 0) - quantity);
+            await client.query(
+              `UPDATE inventory SET quantity = $1, updated_at = NOW() WHERE id = $2`,
+              [updatedQuantity, inventoryId]
+            );
+          }
+        }
+
+        const result = await client.query(
+          `INSERT INTO sales (
+             user_id, inventory_id, product_name, quantity, sale_date, sale_time,
+             unit_price, cost_price, total_amount, profit, customer_id,
+             bonus_adjustment, adjustment_reason, invoice_id, auto_recorded,
+             created_at, updated_at
+           )
+           VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+           RETURNING id, inventory_id, product_name, quantity, sale_date, sale_time,
+                     unit_price, cost_price, total_amount, profit, customer_id,
+                     bonus_adjustment, adjustment_reason, invoice_id, auto_recorded, created_at`,
+          [
+            userId,
+            inventoryId,
+            productName,
+            quantity,
+            saleDate,
+            unitPrice,
+            costPrice,
+            totalAmount,
+            profit,
+            customerId,
+            bonusAdjustment,
+            product.adjustmentReason || null,
+            invoiceId,
+            autoRecorded,
+          ]
+        );
+
+        results.push(result.rows[0]);
+      }
+
+      await client.query('COMMIT');
+      return results;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async autoRecordSalesFromInvoice(userId, invoiceId) {
+    try {
+      const invoiceResult = await query(
+        `SELECT id, customer_id, amount FROM invoices WHERE id = $1 AND user_id = $2`,
+        [invoiceId, userId]
+      );
+
+      if (!invoiceResult.rows.length) {
+        throw new Error('Invoice not found');
+      }
+
+      const invoice = invoiceResult.rows[0];
+      const invoiceItemsResult = await query(
+        `SELECT inventory_id, product_name, unit, quantity, unit_price, cost_price, total_price
+         FROM invoice_items
+         WHERE invoice_id = $1`,
+        [invoiceId]
+      );
+
+      const products = invoiceItemsResult.rows.map(item => ({
+        inventoryId: item.inventory_id,
+        productName: item.product_name,
+        quantity: Number(item.quantity || 0),
+        unitPrice: Number(item.unit_price || 0),
+        costPrice: Number(item.cost_price || 0),
+        bonusAdjustment: 0,
+      }));
+
+      const salesBatch = {
+        customerId: invoice.customer_id,
+        saleDate: new Date().toISOString().slice(0, 10),
+        invoiceId: invoiceId,
+        autoRecorded: true,
+        products,
+      };
+
+      return await this.createBulkSales(userId, salesBatch);
+    } catch (err) {
+      logger.error(`Failed to auto-record sales from invoice ${invoiceId}:`, err);
+      throw err;
     }
   }
 
@@ -1423,4 +1585,3 @@ class BusinessService {
 
 module.exports = new BusinessService();
 
-module.exports = new BusinessService();

@@ -198,6 +198,15 @@ router.post('/sales', authMiddleware, async (req, res, next) => {
   }
 });
 
+router.post('/sales/bulk', authMiddleware, async (req, res, next) => {
+  try {
+    const sales = await businessService.createBulkSales(req.user.userId, req.body);
+    res.status(201).json({ success: true, data: sales });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/sales/analytics', authMiddleware, async (req, res, next) => {
   try {
     const analytics = await businessService.getSalesAnalytics(req.user.userId);

@@ -2146,3 +2146,325 @@ html, body {
   align-items: center;
   gap: 8px;
 }
+/* ─── SALES CARDS INTERFACE ────────────────────────────────────────────── */
+.sales-analytics-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 15px;
+  margin-bottom: 30px;
+}
+
+.stat-card.compact {
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.stat-card.compact h4 {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.stat-card.compact .stat-number {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.sales-form-container {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 30px;
+  border: 1px solid var(--border);
+}
+
+.sales-form-container h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 20px;
+  color: var(--text);
+}
+
+.sales-form-modern {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.form-section {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 20px;
+}
+
+.form-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.form-section h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.customer-selector {
+  background: var(--surface-muted);
+  padding: 16px;
+  border-radius: 8px;
+}
+
+#newCustomerForm {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#newCustomerForm .form-group {
+  margin-bottom: 0;
+}
+
+.products-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.product-card {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.product-card .card-header {
+  background: var(--primary);
+  color: white;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.product-card .card-header h5 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.product-card .btn-remove-product {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.product-card .btn-remove-product:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.product-card .card-content {
+  padding: 16px;
+}
+
+.product-card .form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.product-card .form-row:last-child {
+  margin-bottom: 0;
+}
+
+.product-card .form-group {
+  margin-bottom: 0;
+}
+
+.product-card .form-group label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.product-card .form-group input,
+.product-card .form-group select {
+  font-size: 14px;
+}
+
+.product-summary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.product-summary .summary-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.product-summary .summary-line:last-child {
+  margin-bottom: 0;
+}
+
+.product-summary .summary-line span:first-child {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.product-summary .summary-line .subtotal-0,
+.product-summary .summary-line .profit-0 {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.form-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.form-actions .btn-primary,
+.form-actions .btn {
+  padding: 12px 24px;
+}
+
+.sales-history-section {
+  margin-top: 40px;
+}
+
+.sales-history-section h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 20px;
+  color: var(--text);
+}
+
+.sales-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.sales-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.sales-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.sales-card .card-header {
+  background: var(--surface-muted);
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.sales-card .card-header h5 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sales-card .card-date {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  margin-left: 12px;
+}
+
+.sales-card .card-body {
+  padding: 12px 16px;
+}
+
+.sales-card .card-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--surface-muted);
+}
+
+.sales-card .card-row:last-child {
+  border-bottom: none;
+}
+
+.sales-card .card-row .label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.sales-card .card-row .value {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sales-card .card-row.profit-row.profitable .value {
+  color: var(--success);
+}
+
+.sales-card .card-row.profit-row.loss .value {
+  color: var(--danger);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border-radius: 8px;
+}
+
+@media (max-width: 768px) {
+  .products-container {
+    grid-template-columns: 1fr;
+  }
+
+  .product-card .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-actions {
+    flex-direction: column-reverse;
+  }
+
+  .form-actions .btn-primary,
+  .form-actions .btn {
+    width: 100%;
+  }
+}
