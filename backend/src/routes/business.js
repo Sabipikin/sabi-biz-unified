@@ -207,6 +207,24 @@ router.post('/sales/bulk', authMiddleware, async (req, res, next) => {
   }
 });
 
+router.put('/sales/:id', authMiddleware, async (req, res, next) => {
+  try {
+    const sale = await businessService.updateSale(req.user.userId, req.params.id, req.body);
+    res.json({ success: true, data: sale });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/sales/:id', authMiddleware, async (req, res, next) => {
+  try {
+    const result = await businessService.deleteSale(req.user.userId, req.params.id);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/sales/analytics', authMiddleware, async (req, res, next) => {
   try {
     const analytics = await businessService.getSalesAnalytics(req.user.userId);

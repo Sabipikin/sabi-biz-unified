@@ -147,6 +147,13 @@ const API = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+    updateSale: (id, data) => API.request(`/api/business/sales/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+    deleteSale: (id) => API.request(`/api/business/sales/${id}`, {
+      method: 'DELETE',
+    }),
     salesAnalytics: () => API.request('/api/business/sales/analytics'),
     customersAnalytics: () => API.request('/api/business/customers/analytics'),
   },
@@ -2447,6 +2454,8 @@ async function renderSales() {
   const saleCustomerSelect = document.getElementById('saleCustomer');
   const newCustomerForm = document.getElementById('newCustomerForm');
   const salesForm = document.getElementById('salesForm');
+  let editingSaleId = null;
+  const salesSubmitButton = salesForm.querySelector('button[type="submit"]');
 
   function renderProductCard(index) {
     const inventoryOptions = inventory.map(item => `
@@ -2598,6 +2607,8 @@ async function renderSales() {
   salesForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
+    setButtonLoading(salesSubmitButton, true, editingSaleId ? 'Saving...' : 'Recording...');
+
     const productCards = productsContainer.querySelectorAll('.product-card');
     if (productCards.length === 0) {
       notify('Add at least one product to record a sale.', 'error');
@@ -2658,12 +2669,91 @@ async function renderSales() {
       products,
     };
 
-    const result = await API.business.createBulkSales(salesData);
-    if (result?.success) {
-      notify('Sales recorded successfully.');
-      await renderSales();
-    } else {
-      notify(result?.message || 'Unable to record sales.', 'error');
+    try {
+      let result;
+      if (editingSaleId) {
+        // editing a single existing sale - use first product only
+        const p = products[0];
+        const singleSale = {
+          inventory_id: p.inventoryId,
+          product_name: p.productName || null,
+          quantity: p.quantity,
+          unit_price: p.unitPrice,
+          cost_price: p.costPrice,
+          bonus_adjustment: p.bonusAdjustment,
+          adjustment_reason: p.adjustmentReason || null,
+          customer_id: salesData.customerId || null,
+          sale_date: salesData.saleDate,
+        };
+        result = await API.business.updateSale(editingSaleId, singleSale);
+      } else {
+        result = await API.business.createBulkSales(salesData);
+      }
+
+      if (result?.success) {
+        if (editingSaleId) {
+          notify('Sale updated.');
+          editingSaleId = null;
+        } else {
+          notify('Sales recorded successfully.');
+        }
+        await renderSales();
+      } else {
+        notify(result?.message || 'Unable to record sales.', 'error');
+      }
+    } catch (err) {
+      notify(err?.message || 'Unable to record sales.', 'error');
+    } finally {
+      setButtonLoading(salesSubmitButton, false);
+    }
+  });
+
+  // delegated handlers for edit/delete actions in sales cards and table
+  document.getElementById('content')?.addEventListener('click', async (ev) => {
+    const editBtn = ev.target.closest('.edit-sale');
+    if (editBtn) {
+      ev.preventDefault();
+      const saleId = editBtn.dataset.saleId;
+      const sale = sales.find(s => String(s.id) === String(saleId));
+      if (!sale) {
+        notify('Sale not found.', 'error');
+        return;
+      }
+      // prepare form for editing single sale
+      editingSaleId = saleId;
+      productsContainer.innerHTML = '';
+      productIndex = 0;
+      addProductCard();
+      const card = productsContainer.querySelector('.product-card');
+      // set inventory selection if available
+      if (sale.inventory_id) {
+        const select = card.querySelector('.product-select');
+        if (select) select.value = sale.inventory_id;
+      }
+      card.querySelector('.quantity-input').value = sale.quantity || 1;
+      card.querySelector('.unit-price-input').value = sale.unit_price || 0;
+      card.querySelector('.cost-price-input').value = sale.cost_price || 0;
+      card.querySelector('.bonus-input').value = sale.bonus_adjustment || 0;
+      card.querySelector('.reason-input').value = sale.adjustment_reason || '';
+      document.getElementById('saleDateInput').value = sale.sale_date ? sale.sale_date.slice(0,10) : new Date().toISOString().slice(0,10);
+      saleCustomerSelect.value = sale.customer_id || '';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    const delBtn = ev.target.closest('.delete-sale');
+    if (delBtn) {
+      ev.preventDefault();
+      const saleId = delBtn.dataset.saleId;
+      if (!confirm('Delete this sale? This will restore inventory.')) return;
+      const res = await API.business.deleteSale(saleId);
+      if (res?.success) {
+        notify('Sale deleted.');
+        await renderSales();
+      } else {
+        notify(res?.message || 'Unable to delete sale.', 'error');
+      }
+      return;
     }
   });
 }
@@ -2677,6 +2767,10 @@ function renderSalesHistoryCards(sales) {
     <div class="sales-card">
       <div class="card-header">
         <h5>${escapeHtml(sale.product_name || '-')}</h5>
+        <div class="card-actions">
+          <button class="btn small edit-sale" data-sale-id="${sale.id}">Edit</button>
+          <button class="btn small danger delete-sale" data-sale-id="${sale.id}">Delete</button>
+        </div>
         <span class="card-date">${formatDate(sale.sale_date || sale.sale_time)}</span>
       </div>
       <div class="card-body">
@@ -2722,6 +2816,7 @@ function renderSalesTable(sales) {
             <th>Total</th>
             <th>Profit</th>
             <th>Sale Date</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -2733,6 +2828,10 @@ function renderSalesTable(sales) {
               <td>${formatMoney(sale.total_amount)}</td>
               <td>${formatMoney(sale.profit)}</td>
               <td>${formatDate(sale.sale_date || sale.sale_time)}</td>
+              <td>
+                <button class="btn small edit-sale" data-sale-id="${sale.id}">Edit</button>
+                <button class="btn small danger delete-sale" data-sale-id="${sale.id}">Delete</button>
+              </td>
             </tr>
           `).join('')}
         </tbody>

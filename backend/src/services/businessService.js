@@ -1494,6 +1494,136 @@ class BusinessService {
     }
   }
 
+  async updateSale(userId, saleId, sale) {
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      const existingRes = await client.query(
+        `SELECT id, inventory_id, quantity FROM sales WHERE id = $1 AND user_id = $2`,
+        [saleId, userId]
+      );
+      if (!existingRes.rows.length) {
+        throw new Error('Sale not found');
+      }
+
+      const existing = existingRes.rows[0];
+
+      // Handle inventory adjustments if inventory item or quantity changed
+      const newInventoryId = sale.inventory_id || null;
+      const newQuantity = Number(sale.quantity || 0);
+
+      if (existing.inventory_id && (!newInventoryId || existing.inventory_id !== newInventoryId)) {
+        // restore old inventory quantity
+        await client.query(
+          `UPDATE inventory SET quantity = quantity + $1, updated_at = NOW() WHERE id = $2 AND user_id = $3`,
+          [existing.quantity || 0, existing.inventory_id, userId]
+        );
+      }
+
+      if (newInventoryId) {
+        // if same inventory, adjust by diff; if different and we restored above, just deduct new
+        if (existing.inventory_id === newInventoryId) {
+          const diff = (existing.quantity || 0) - newQuantity; // positive -> add back, negative -> deduct more
+          if (diff !== 0) {
+            await client.query(
+              `UPDATE inventory SET quantity = GREATEST(0, quantity + $1), updated_at = NOW() WHERE id = $2 AND user_id = $3`,
+              [diff, newInventoryId, userId]
+            );
+          }
+        } else {
+          // deduct new quantity from new inventory
+          await client.query(
+            `UPDATE inventory SET quantity = GREATEST(0, quantity - $1), updated_at = NOW() WHERE id = $2 AND user_id = $3`,
+            [newQuantity, newInventoryId, userId]
+          );
+        }
+      }
+
+      // compute totals
+      const quantity = newQuantity;
+      const unitPrice = Number(sale.unit_price || 0);
+      const costPrice = Number(sale.cost_price || 0);
+      const bonusAdjustment = Number(sale.bonus_adjustment || 0);
+      const totalAmount = Number(quantity * unitPrice);
+      const profit = Number((unitPrice - costPrice) * quantity) + bonusAdjustment;
+
+      const updateRes = await client.query(
+        `UPDATE sales SET
+           inventory_id = $1,
+           product_name = $2,
+           quantity = $3,
+           sale_date = $4,
+           unit_price = $5,
+           cost_price = $6,
+           total_amount = $7,
+           profit = $8,
+           customer_id = $9,
+           bonus_adjustment = $10,
+           adjustment_reason = $11,
+           updated_at = NOW()
+         WHERE id = $12 AND user_id = $13
+         RETURNING id, inventory_id, product_name, quantity, sale_date, sale_time, unit_price, cost_price, total_amount, profit, customer_id, bonus_adjustment, adjustment_reason, invoice_id, auto_recorded, created_at, updated_at`,
+        [
+          newInventoryId,
+          sale.product_name || sale.productName || null,
+          quantity,
+          sale.sale_date || new Date().toISOString().slice(0, 10),
+          unitPrice,
+          costPrice,
+          totalAmount,
+          profit,
+          sale.customer_id || sale.customerId || null,
+          bonusAdjustment,
+          sale.adjustment_reason || sale.adjustmentReason || null,
+          saleId,
+          userId,
+        ]
+      );
+
+      await client.query('COMMIT');
+      return updateRes.rows[0];
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteSale(userId, saleId) {
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      const res = await client.query(
+        `SELECT id, inventory_id, quantity FROM sales WHERE id = $1 AND user_id = $2`,
+        [saleId, userId]
+      );
+      if (!res.rows.length) {
+        throw new Error('Sale not found');
+      }
+
+      const sale = res.rows[0];
+      if (sale.inventory_id) {
+        await client.query(
+          `UPDATE inventory SET quantity = quantity + $1, updated_at = NOW() WHERE id = $2 AND user_id = $3`,
+          [sale.quantity || 0, sale.inventory_id, userId]
+        );
+      }
+
+      await client.query(`DELETE FROM sales WHERE id = $1 AND user_id = $2`, [saleId, userId]);
+
+      await client.query('COMMIT');
+      return { success: true };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   async autoRecordSalesFromInvoice(userId, invoiceId) {
     try {
       const invoiceResult = await query(
