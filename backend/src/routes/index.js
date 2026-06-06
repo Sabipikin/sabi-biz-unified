@@ -10,4 +10,5 @@ module.exports = {
   webhooks: require('./webhooks'),
   admin: require('./admin'),
   analytics: require('./analytics'),
+  conversations: require('./conversations'),
 };

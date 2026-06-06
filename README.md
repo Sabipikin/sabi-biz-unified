@@ -114,12 +114,37 @@ Sales analytics calculate total sales, total profit, total loss, average margin,
 The WhatsApp module supports:
 
 - Meta WhatsApp webhook verification.
-- Incoming webhook processing and message storage.
+- Incoming webhook processing, message storage, and AI sales-assistant workflows.
 - Outgoing text messages through the WhatsApp Cloud API when `WHATSAPP_TOKEN` and `PHONE_NUMBER_ID` are configured.
 - Manual message sending from the frontend.
 - Optional `useAI` flag stored with outgoing messages.
+- Tenant resolution by WhatsApp phone-number metadata, using `users.whatsapp_phone_number_id`, `users.whatsapp_phone`, or the account phone.
 
-The current service stores AI-related flags/configuration but does not yet call OpenAI to generate replies.
+Incoming customer messages now create or resume records in `conversations`, append entries to `conversation_messages`, build a business context from customer profile, purchase history, invoices, inventory, product prices, and recent chat history, then generate an AI reply. If `OPENAI_API_KEY` or the user's stored `openai_api_key` is unavailable, the workflow uses a deterministic fallback assistant so local and test environments remain usable.
+
+Every AI workflow writes an `ai_interactions` row with the prompt, JSON context, model/provider, detected intent, response text, invoice draft data when applicable, escalation flag, and status/error details.
+
+The AI assistant is designed to:
+
+- Answer product and stock questions from inventory.
+- Quote product prices without inventing unavailable data.
+- Recommend available products.
+- Generate invoice draft payloads for quoted products.
+- Capture new WhatsApp leads into `customers`.
+- Escalate conversations to human takeover for complaints, refund requests, or explicit agent requests.
+
+### Conversation Dashboard
+
+The customer frontend WhatsApp area is now a sales-assistant dashboard with:
+
+- Active chats.
+- AI-handled chat count.
+- Human takeover queue.
+- Unread message count.
+- Conversation list and message thread.
+- AI invoice draft preview.
+- Human takeover assignment.
+- Manual agent replies.
 
 ### Customer Milestone Messages
 
@@ -239,6 +264,13 @@ Base URL in development: `http://localhost:3000`
 - `GET /api/whatsapp/webhook`
 - `POST /api/whatsapp/webhook`
 - `POST /api/whatsapp/send`
+
+### Conversations
+
+- `GET /api/conversations`
+- `GET /api/conversations/:id`
+- `POST /api/conversations/:id/assign`
+- `POST /api/conversations/:id/reply`
 
 ### Subscriptions and Payments
 
@@ -466,4 +498,3 @@ Partially implemented or placeholder:
 ## Product Positioning
 
 SabiBiz is best understood as an operations companion for Nigerian SMEs: it gives business owners a practical way to know who their customers are, what has been sold, what stock remains, which invoices are pending, how much profit they are making, and how to keep customer relationships warm through WhatsApp.
-

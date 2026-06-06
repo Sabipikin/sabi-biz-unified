@@ -168,6 +168,19 @@ const API = {
     }),
   },
 
+  conversations: {
+    list: () => API.request('/api/conversations'),
+    detail: (id) => API.request(`/api/conversations/${id}`),
+    assign: (id, data = {}) => API.request(`/api/conversations/${id}/assign`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    reply: (id, data) => API.request(`/api/conversations/${id}/reply`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  },
+
   analytics: {
     metrics: () => API.request('/api/analytics'),
   },
@@ -1062,7 +1075,7 @@ async function navigateDashboard(route) {
       await renderCustomers();
     }
   } else if (route === 'whatsapp') {
-    renderWhatsApp();
+    await renderWhatsApp();
   } else if (route === 'subscriptions') {
     await renderSubscriptions();
   } else if (route === 'settings') {
@@ -3415,7 +3428,7 @@ function renderSalesTable(sales) {
   `;
 }
 
-async function renderWhatsApp() {
+async function renderWhatsAppLegacy() {
   const [customersRes, templatesRes] = await Promise.all([
     API.business.customers(),
     API.business.milestoneTemplates(),
@@ -3606,6 +3619,180 @@ async function renderWhatsApp() {
       notify('Send cancelled.');
     });
   });
+}
+
+async function renderWhatsApp() {
+  const response = await API.conversations.list();
+  const payload = getResponseData(response, { summary: {}, conversations: [] });
+  const error = getResponseError(response, 'Conversations could not be loaded.');
+  const summary = payload.summary || {};
+  const conversations = payload.conversations || [];
+  const selectedId = conversations[0]?.id || null;
+
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>WhatsApp Sales Assistant</h2>
+          <p>Monitor AI conversations, unread customer messages, and human takeover from one workspace.</p>
+        </div>
+        <button type="button" id="refreshConversations" class="btn secondary">Refresh</button>
+      </div>
+      ${error ? renderSectionError(error) : ''}
+      <div class="conversation-metrics">
+        <div class="overview-card">
+          <h4>Active chats</h4>
+          <p>${Number(summary.active_chats || 0)}</p>
+        </div>
+        <div class="overview-card">
+          <h4>AI handled</h4>
+          <p>${Number(summary.ai_handled_chats || 0)}</p>
+        </div>
+        <div class="overview-card">
+          <h4>Human takeover</h4>
+          <p>${Number(summary.human_takeover || 0)}</p>
+        </div>
+        <div class="overview-card">
+          <h4>Unread messages</h4>
+          <p>${Number(summary.unread_messages || 0)}</p>
+        </div>
+      </div>
+      <div class="conversation-dashboard">
+        <aside class="conversation-list" id="conversationList">
+          ${renderConversationList(conversations, selectedId)}
+        </aside>
+        <section class="conversation-detail" id="conversationDetail">
+          ${selectedId ? '<div class="empty-state">Loading conversation...</div>' : '<div class="empty-state">No conversations yet. Incoming WhatsApp messages will appear here after the webhook receives them.</div>'}
+        </section>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('refreshConversations')?.addEventListener('click', renderWhatsApp);
+  document.getElementById('conversationList')?.addEventListener('click', async (event) => {
+    const item = event.target.closest('[data-conversation-id]');
+    if (!item) return;
+    document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
+    item.classList.add('active');
+    await loadConversationDetail(item.dataset.conversationId);
+  });
+
+  if (selectedId) {
+    await loadConversationDetail(selectedId);
+  }
+}
+
+function renderConversationList(conversations, selectedId) {
+  if (!conversations.length) {
+    return '<div class="empty-state">No active chats.</div>';
+  }
+
+  return conversations.map(conversation => `
+    <button type="button" class="conversation-item ${conversation.id === selectedId ? 'active' : ''}" data-conversation-id="${escapeHtml(conversation.id)}">
+      <span class="conversation-item-top">
+        <strong>${escapeHtml(conversation.customer_name || conversation.contact_name || conversation.external_contact_phone)}</strong>
+        ${Number(conversation.unread_count || 0) ? `<span class="unread-badge">${Number(conversation.unread_count || 0)}</span>` : ''}
+      </span>
+      <span class="conversation-item-meta">
+        <span class="status ${escapeHtml(conversation.ai_status || 'active')}">${escapeHtml((conversation.ai_status || 'active').replace(/_/g, ' '))}</span>
+        <span>${formatDate(conversation.last_message_at)}</span>
+      </span>
+      <span class="conversation-snippet">${escapeHtml(conversation.last_message_text || 'No messages yet')}</span>
+    </button>
+  `).join('');
+}
+
+async function loadConversationDetail(conversationId) {
+  const container = document.getElementById('conversationDetail');
+  if (!container) return;
+  container.innerHTML = '<div class="empty-state">Loading conversation...</div>';
+
+  const response = await API.conversations.detail(conversationId);
+  const conversation = getResponseData(response, null);
+  if (!conversation) {
+    container.innerHTML = renderSectionError(getResponseError(response, 'Conversation could not be loaded.'));
+    return;
+  }
+
+  container.innerHTML = renderConversationDetail(conversation);
+
+  document.getElementById('assignConversation')?.addEventListener('click', async () => {
+    const result = await API.conversations.assign(conversation.id, {});
+    if (result?.success) {
+      notify('Conversation assigned for human takeover.');
+      await renderWhatsApp();
+    } else {
+      notify(result?.message || 'Unable to assign conversation.', 'error');
+    }
+  });
+
+  document.getElementById('conversationReplyForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Sending...');
+    const message = document.getElementById('conversationReplyText').value.trim();
+    if (!message) {
+      notify('Reply cannot be empty.', 'error');
+      setButtonLoading(submitButton, false);
+      return;
+    }
+
+    const result = await API.conversations.reply(conversation.id, { message, useAI: false });
+    if (result?.success) {
+      notify('Reply sent.');
+      await loadConversationDetail(conversation.id);
+    } else {
+      notify(result?.message || 'Unable to send reply.', 'error');
+    }
+    setButtonLoading(submitButton, false);
+  });
+}
+
+function renderConversationDetail(conversation) {
+  const messages = conversation.messages || [];
+  const latestAi = (conversation.ai_interactions || [])[0];
+  const invoiceDraft = latestAi?.invoice_draft;
+
+  return `
+    <div class="conversation-detail-header">
+      <div>
+        <h3>${escapeHtml(conversation.customer_name || conversation.contact_name || conversation.external_contact_phone)}</h3>
+        <p>${escapeHtml(conversation.external_contact_phone || '')}</p>
+      </div>
+      <div class="button-row conversation-actions">
+        <span class="status ${escapeHtml(conversation.status || 'active')}">${escapeHtml(conversation.status || 'active')}</span>
+        <button type="button" id="assignConversation" class="btn secondary">Human takeover</button>
+      </div>
+    </div>
+    ${invoiceDraft ? renderInvoiceDraft(invoiceDraft) : ''}
+    <div class="message-thread">
+      ${messages.length ? messages.map(message => `
+        <div class="message-bubble ${message.direction === 'outbound' ? 'outbound' : 'inbound'}">
+          <div class="message-meta">${escapeHtml(message.sender_type)} - ${formatDate(message.created_at)}</div>
+          <div>${escapeHtml(message.message_text).replace(/\n/g, '<br>')}</div>
+        </div>
+      `).join('') : '<div class="empty-state">No messages in this conversation.</div>'}
+    </div>
+    <form id="conversationReplyForm" class="conversation-reply">
+      <textarea id="conversationReplyText" rows="4" required placeholder="Type a human reply..."></textarea>
+      <button type="submit" class="btn-primary">Send reply</button>
+    </form>
+  `;
+}
+
+function renderInvoiceDraft(invoiceDraft) {
+  const items = Array.isArray(invoiceDraft.invoice_items) ? invoiceDraft.invoice_items : [];
+  return `
+    <div class="invoice-draft">
+      <h4>AI invoice draft</h4>
+      <p>${escapeHtml(invoiceDraft.customer_name || 'Customer')} - ${formatMoney(invoiceDraft.amount)}</p>
+      ${items.length ? `
+        <ul>
+          ${items.map(item => `<li>${escapeHtml(item.product_name)} - ${Number(item.quantity || 0)} x ${formatMoney(item.unit_price)}</li>`).join('')}
+        </ul>
+      ` : ''}
+    </div>
+  `;
 }
 
 async function renderSubscriptions() {

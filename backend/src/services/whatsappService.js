@@ -4,6 +4,7 @@ const axios = require('axios');
 const { query } = require('../config/db');
 const logger = require('../config/logger');
 const { v4: uuidv4 } = require('uuid');
+const conversationEngine = require('./conversationEngine');
 
 class WhatsAppService {
   async handleWebhook(payload) {
@@ -15,21 +16,38 @@ class WhatsAppService {
       for (const change of changes) {
         const value = change.value || {};
         const messages = value.messages || [];
+        const contacts = value.contacts || [];
+        const userId = await conversationEngine.resolveTenantFromWebhookValue(value);
+
+        if (!userId && messages.length) {
+          logger.warn('WhatsApp webhook could not be mapped to a tenant');
+        }
+
         for (const message of messages) {
-          await this.saveIncomingMessage(message);
+          if (!userId) {
+            continue;
+          }
+
+          const contact = contacts.find(item => item.wa_id === message.from) || {};
+          await this.saveIncomingMessage(userId, message);
+          const workflow = await conversationEngine.handleIncomingWhatsAppMessage(userId, message, contact);
+
+          if (workflow?.aiResult?.responseText) {
+            await this.sendMessage(userId, message.from, workflow.aiResult.responseText, true);
+          }
         }
       }
     }
   }
 
-  async saveIncomingMessage(message) {
+  async saveIncomingMessage(userId, message) {
     const { from, id, timestamp, text } = message;
     const messageText = text?.body || null;
 
     await query(
-      `INSERT INTO whatsapp_messages (id, from_phone, message_text, message_type, is_incoming, created_at)
-       VALUES ($1, $2, $3, $4, true, TO_TIMESTAMP($5::double precision))`,
-      [uuidv4(), from, messageText, 'text', timestamp]
+      `INSERT INTO whatsapp_messages (id, user_id, from_phone, message_text, message_type, message_id, is_incoming, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, true, TO_TIMESTAMP($7::double precision))`,
+      [uuidv4(), userId, from, messageText, 'text', id, timestamp]
     );
 
     logger.info(`Saved incoming WhatsApp message from ${from}`);

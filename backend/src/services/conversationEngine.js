@@ -1,0 +1,385 @@
+const axios = require('axios');
+const { query, getClient } = require('../config/db');
+const logger = require('../config/logger');
+const aiContextGenerator = require('./aiContextGenerator');
+
+function normalizePhone(phone = '') {
+  return String(phone || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
+}
+
+function money(value) {
+  return `NGN ${Number(value || 0).toLocaleString()}`;
+}
+
+function classifyIntent(messageText = '') {
+  const text = messageText.toLowerCase();
+  if (/(agent|human|person|manager|complain|complaint|refund|angry|upset)/.test(text)) return 'escalate';
+  if (/(invoice|bill|receipt|quote|quotation|order)/.test(text)) return 'invoice_draft';
+  if (/(recommend|suggest|best|which|advice)/.test(text)) return 'recommendation';
+  if (/(price|cost|how much|amount|rate)/.test(text)) return 'price_quote';
+  if (/(available|stock|inventory|have it|in stock)/.test(text)) return 'availability';
+  return 'product_question';
+}
+
+function findMentionedProducts(messageText, products) {
+  const text = String(messageText || '').toLowerCase();
+  return products.filter(product => text.includes(String(product.product_name || '').toLowerCase()));
+}
+
+function buildInvoiceDraft(customer, messageText, products) {
+  const mentioned = findMentionedProducts(messageText, products).slice(0, 5);
+  if (!mentioned.length) return null;
+
+  const items = mentioned.map(product => ({
+    inventory_id: product.id,
+    product_name: product.product_name,
+    quantity: 1,
+    unit_price: Number(product.unit_price || 0),
+    total_price: Number(product.unit_price || 0),
+  }));
+
+  return {
+    customer_name: customer?.name || 'WhatsApp lead',
+    customer_phone: customer?.phone || null,
+    status: 'draft',
+    amount: items.reduce((sum, item) => sum + item.total_price, 0),
+    invoice_items: items,
+    source: 'ai_whatsapp_conversation',
+  };
+}
+
+function buildFallbackResponse(context, messageText, intent, invoiceDraft) {
+  const products = context.products || [];
+  const businessName = context.business_name || 'our business';
+  const mentioned = findMentionedProducts(messageText, products);
+
+  if (intent === 'escalate') {
+    return {
+      text: `Thanks for reaching out. I am handing this over to a human agent from ${businessName} so they can help properly.`,
+      escalated: true,
+    };
+  }
+
+  if (invoiceDraft) {
+    const lines = invoiceDraft.invoice_items.map(item => `${item.product_name} - ${money(item.unit_price)}`);
+    return {
+      text: `I can draft that invoice for you. Here is the quote:\n${lines.join('\n')}\nTotal: ${money(invoiceDraft.amount)}\nA team member can confirm and send the final invoice.`,
+      escalated: false,
+    };
+  }
+
+  if (mentioned.length) {
+    const lines = mentioned.map(product => {
+      const stock = Number(product.quantity || 0) > 0 ? `${product.quantity} available` : 'currently out of stock';
+      return `${product.product_name}: ${money(product.unit_price)} (${stock})`;
+    });
+    return {
+      text: `Here are the details from ${businessName}:\n${lines.join('\n')}`,
+      escalated: false,
+    };
+  }
+
+  if (products.length) {
+    const available = products.filter(product => Number(product.quantity || 0) > 0).slice(0, 4);
+    const list = available.map(product => `${product.product_name} at ${money(product.unit_price)}`).join(', ');
+    return {
+      text: `Thanks for messaging ${businessName}. We can help with product questions, prices, recommendations, and invoice drafts. Popular available items include: ${list}.`,
+      escalated: false,
+    };
+  }
+
+  return {
+    text: `Thanks for messaging ${businessName}. A team member will follow up with product and pricing details shortly.`,
+    escalated: true,
+  };
+}
+
+function buildPrompt(context, messageText, intent) {
+  return [
+    `You are an AI sales assistant for ${context.business_name}.`,
+    'Use only the supplied business context. Be concise, friendly, and sales-oriented.',
+    'You can answer product questions, quote prices, recommend products, draft invoice summaries, capture leads, and escalate when a human is needed.',
+    'If inventory is unavailable, say so clearly. Never invent prices or stock.',
+    `Detected intent: ${intent}`,
+    `Customer message: ${messageText}`,
+  ].join('\n');
+}
+
+class ConversationEngine {
+  async resolveTenantFromWebhookValue(value = {}) {
+    const metadata = value.metadata || {};
+    const phoneNumberId = metadata.phone_number_id || null;
+    const displayPhone = normalizePhone(metadata.display_phone_number || '');
+
+    if (phoneNumberId) {
+      const byPhoneNumberId = await query(
+        `SELECT id FROM users
+         WHERE whatsapp_phone_number_id = $1 OR whatsapp_phone = $1
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [phoneNumberId]
+      );
+      if (byPhoneNumberId.rows[0]) return byPhoneNumberId.rows[0].id;
+    }
+
+    if (displayPhone) {
+      const byDisplayPhone = await query(
+        `SELECT id FROM users
+         WHERE regexp_replace(COALESCE(whatsapp_phone, phone, ''), '[^0-9]', '', 'g') = $1
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [displayPhone]
+      );
+      if (byDisplayPhone.rows[0]) return byDisplayPhone.rows[0].id;
+    }
+
+    return null;
+  }
+
+  async handleIncomingWhatsAppMessage(userId, message, contact = {}) {
+    const fromPhone = normalizePhone(message.from);
+    const messageText = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || '';
+    if (!userId || !fromPhone || !messageText) {
+      return null;
+    }
+
+    const customer = await this.findOrCreateLead(userId, fromPhone, contact);
+    const conversation = await this.findOrCreateConversation(userId, customer, fromPhone, contact);
+    const inboundMessage = await this.addMessage({
+      userId,
+      conversationId: conversation.id,
+      direction: 'inbound',
+      senderType: 'customer',
+      messageText,
+      externalMessageId: message.id,
+      isRead: false,
+      metadata: { whatsapp_timestamp: message.timestamp },
+    });
+
+    const aiResult = await this.runAiWorkflow(userId, conversation.id, customer, inboundMessage, messageText);
+
+    return {
+      conversation,
+      inboundMessage,
+      aiResult,
+    };
+  }
+
+  async findOrCreateLead(userId, phone, contact = {}) {
+    const existing = await aiContextGenerator.getCustomerByPhone(userId, phone);
+    if (existing) return existing;
+
+    const profileName = contact.profile?.name || contact.wa_id || `WhatsApp lead ${phone}`;
+    const result = await query(
+      `INSERT INTO customers (user_id, name, phone, created_at, updated_at)
+       VALUES ($1, $2, $3, NOW(), NOW())
+       RETURNING id, name, phone, email, created_at, updated_at`,
+      [userId, profileName, phone]
+    );
+    return result.rows[0];
+  }
+
+  async findOrCreateConversation(userId, customer, phone, contact = {}) {
+    const existing = await query(
+      `SELECT * FROM conversations
+       WHERE user_id = $1 AND channel = 'whatsapp' AND external_contact_phone = $2 AND status != 'closed'
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [userId, phone]
+    );
+    if (existing.rows[0]) return existing.rows[0];
+
+    const result = await query(
+      `INSERT INTO conversations (
+         user_id, customer_id, channel, external_contact_phone, contact_name,
+         status, ai_status, last_message_at, unread_count, metadata, created_at, updated_at
+       )
+       VALUES ($1, $2, 'whatsapp', $3, $4, 'active', 'ai_handled', NOW(), 0, $5::jsonb, NOW(), NOW())
+       RETURNING *`,
+      [
+        userId,
+        customer?.id || null,
+        phone,
+        customer?.name || contact.profile?.name || null,
+        JSON.stringify({ wa_id: contact.wa_id || null }),
+      ]
+    );
+    return result.rows[0];
+  }
+
+  async addMessage({ userId, conversationId, direction, senderType, messageText, externalMessageId = null, isRead = true, metadata = {} }) {
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      const messageResult = await client.query(
+        `INSERT INTO conversation_messages (
+           conversation_id, user_id, direction, sender_type, message_text,
+           external_message_id, is_read, metadata, created_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
+         RETURNING *`,
+        [conversationId, userId, direction, senderType, messageText, externalMessageId, isRead, JSON.stringify(metadata)]
+      );
+
+      const unreadIncrement = direction === 'inbound' && !isRead ? 1 : 0;
+      await client.query(
+        `UPDATE conversations
+         SET last_message_at = NOW(),
+             unread_count = unread_count + $1,
+             updated_at = NOW()
+         WHERE id = $2 AND user_id = $3`,
+        [unreadIncrement, conversationId, userId]
+      );
+      await client.query('COMMIT');
+      return messageResult.rows[0];
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async runAiWorkflow(userId, conversationId, customer, inboundMessage, messageText) {
+    const context = await aiContextGenerator.generate(userId, customer?.id, conversationId);
+    const intent = classifyIntent(messageText);
+    const invoiceDraft = intent === 'invoice_draft'
+      ? buildInvoiceDraft(customer, messageText, context.products || [])
+      : null;
+    const prompt = buildPrompt(context, messageText, intent);
+
+    let model = 'rule-based-fallback';
+    let responseText;
+    let escalated = intent === 'escalate';
+    let status = 'completed';
+    let errorMessage = null;
+
+    try {
+      const aiConfig = await this.getAiConfig(userId);
+      const apiKey = aiConfig?.openai_api_key || process.env.OPENAI_API_KEY;
+      model = aiConfig?.model || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
+      if (apiKey) {
+        responseText = await this.callOpenAi({ apiKey, model, prompt, context });
+      }
+    } catch (err) {
+      status = 'fallback';
+      errorMessage = err.message;
+      logger.warn('AI provider failed, using fallback response:', err.message);
+    }
+
+    if (!responseText) {
+      const fallback = buildFallbackResponse(context, messageText, intent, invoiceDraft);
+      responseText = fallback.text;
+      escalated = escalated || fallback.escalated;
+      if (status === 'completed') status = 'fallback';
+    }
+
+    if (escalated) {
+      await query(
+        `UPDATE conversations
+         SET ai_status = 'human_takeover', status = 'needs_human', updated_at = NOW()
+         WHERE id = $1 AND user_id = $2`,
+        [conversationId, userId]
+      );
+    }
+
+    const outboundMessage = await this.addMessage({
+      userId,
+      conversationId,
+      direction: 'outbound',
+      senderType: 'ai',
+      messageText: responseText,
+      isRead: true,
+      metadata: { intent, escalated },
+    });
+
+    await this.logAiInteraction({
+      userId,
+      conversationId,
+      customerId: customer?.id || null,
+      inboundMessageId: inboundMessage.id,
+      model,
+      intent,
+      prompt,
+      context,
+      responseText,
+      invoiceDraft,
+      escalated,
+      status,
+      errorMessage,
+    });
+
+    return {
+      responseText,
+      outboundMessage,
+      invoiceDraft,
+      escalated,
+      intent,
+    };
+  }
+
+  async callOpenAi({ apiKey, model, prompt, context }) {
+    const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+      model,
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: JSON.stringify(context) },
+      ],
+      temperature: 0.4,
+      max_tokens: 450,
+    }, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 15000,
+    });
+
+    return response.data?.choices?.[0]?.message?.content?.trim() || '';
+  }
+
+  async getAiConfig(userId) {
+    const result = await query(
+      `SELECT u.openai_api_key, COALESCE(a.model, 'gpt-4o-mini') AS model,
+              COALESCE(a.temperature, 0.7) AS temperature,
+              COALESCE(a.enabled, u.ai_enabled, true) AS enabled
+       FROM users u
+       LEFT JOIN ai_configs a ON a.user_id = u.id
+       WHERE u.id = $1
+       LIMIT 1`,
+      [userId]
+    );
+    return result.rows[0] || null;
+  }
+
+  async logAiInteraction({ userId, conversationId, customerId, inboundMessageId, model, intent, prompt, context, responseText, invoiceDraft, escalated, status, errorMessage }) {
+    const result = await query(
+      `INSERT INTO ai_interactions (
+         conversation_id, conversation_message_id, user_id, customer_id,
+         provider, model, intent, prompt, context, response_text,
+         invoice_draft, escalated, status, error_message, created_at
+       )
+       VALUES ($1, $2, $3, $4, 'openai', $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11, $12, $13, NOW())
+       RETURNING *`,
+      [
+        conversationId,
+        inboundMessageId,
+        userId,
+        customerId,
+        model,
+        intent,
+        prompt,
+        JSON.stringify(context),
+        responseText,
+        invoiceDraft ? JSON.stringify(invoiceDraft) : null,
+        escalated,
+        status,
+        errorMessage,
+      ]
+    );
+    return result.rows[0];
+  }
+}
+
+module.exports = new ConversationEngine();

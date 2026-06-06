@@ -210,6 +210,7 @@ app.use('/api/payments', routes.payments);
 app.use('/api/webhooks', routes.webhooks);
 app.use('/api/admin', routes.admin);
 app.use('/api/analytics', routes.analytics);
+app.use('/api/conversations', routes.conversations);
 
 // ─── SCHEDULED TASKS ────────────────────────────────────────────────────
 // Run database cleanup every hour
