@@ -63,6 +63,8 @@ const AdminAPI = {
     get: (id) => AdminAPI.request(`/api/admin/users/${id}`),
     suspend: (id) => AdminAPI.request(`/api/admin/users/${id}/suspend`, { method: 'POST' }),
     activate: (id, opts = {}) => AdminAPI.request(`/api/admin/users/${id}/activate`, { method: 'POST', body: JSON.stringify(opts) }),
+    update: (id, data) => AdminAPI.request(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id) => AdminAPI.request(`/api/admin/users/${id}`, { method: 'DELETE' }),
   },
 
   // Subscriptions

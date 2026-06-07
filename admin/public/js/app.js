@@ -34,6 +34,46 @@ function renderShell() {
         <section id="content" class="admin-content"></section>
       </main>
     </div>
+    <!-- Edit user modal -->
+    <div id="editUserModal" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); align-items:center; justify-content:center;">
+      <div style="background:#fff; padding:16px; width:420px; max-width:95%; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.2);">
+        <h3>Edit User</h3>
+        <form id="editUserForm">
+          <div class="form-group">
+            <label for="editName">Full name</label>
+            <input id="editName" name="name" type="text" />
+          </div>
+          <div class="form-group">
+            <label for="editEmail">Email</label>
+            <input id="editEmail" name="email" type="email" />
+          </div>
+          <div class="form-group">
+            <label for="editShopName">Shop name</label>
+            <input id="editShopName" name="shop_name" type="text" />
+          </div>
+          <div class="form-group">
+            <label for="editPlan">Subscription plan</label>
+            <input id="editPlan" name="subscription_plan" type="text" />
+          </div>
+          <div class="form-group">
+            <label for="editExpires">Expires at (ISO)</label>
+            <input id="editExpires" name="subscription_expires_at" type="text" placeholder="2026-01-01T00:00:00Z" />
+          </div>
+          <div class="form-group">
+            <label for="editStatus">Status</label>
+            <select id="editStatus" name="status">
+              <option value="active">active</option>
+              <option value="suspended">suspended</option>
+              <option value="deleted">deleted</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+            <button type="button" id="editCancel" class="btn-secondary">Cancel</button>
+            <button type="submit" id="editSave" class="btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
   `;
 }
 
@@ -245,18 +285,23 @@ async function loadUsers() {
   }
 
   const rows = response.data.map(user => {
-    const actionBtn = user.status === 'suspended'
-      ? `<button class="btn-primary" data-action="activate" data-id="${user.id}">Activate</button>`
-      : `<button class="btn-secondary" data-action="suspend" data-id="${user.id}">Suspend</button>`;
+    const actionBtn = [];
+    if (user.status === 'suspended') {
+      actionBtn.push(`<button class="btn-primary" data-action="activate" data-id="${user.id}">Activate</button>`);
+    } else {
+      actionBtn.push(`<button class="btn-secondary" data-action="suspend" data-id="${user.id}">Suspend</button>`);
+    }
+    actionBtn.push(`<button class="btn-edit" data-action="edit" data-id="${user.id}">Edit</button>`);
+    actionBtn.push(`<button class="btn-danger" data-action="delete" data-id="${user.id}">Delete</button>`);
 
     return `
     <tr>
-      <td>${user.email}</td>
+      <td>${user.email || '-'}</td>
       <td>${user.shop_name || '-'}</td>
       <td>${user.subscription_plan || 'free'}</td>
       <td><span class="status-badge ${user.status}">${user.status}</span></td>
       <td>${new Date(user.created_at).toLocaleDateString()}</td>
-      <td>${actionBtn}</td>
+      <td>${actionBtn.join(' ')}</td>
     </tr>
   `;
   }).join('');
@@ -312,6 +357,27 @@ async function loadUsers() {
         loadUsers();
       } else {
         alert(result?.message || 'Unable to activate user');
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-action="edit"]').forEach(button => {
+    button.addEventListener('click', () => {
+      const userId = button.dataset.id;
+      openEditModal(userId);
+    });
+  });
+
+  document.querySelectorAll('[data-action="delete"]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const userId = button.dataset.id;
+      if (!window.confirm('Are you sure you want to delete this user? This will anonymize the account and remove subscriptions.')) return;
+      const result = await AdminAPI.users.delete(userId);
+      if (result?.success) {
+        alert('User deleted');
+        loadUsers();
+      } else {
+        alert(result?.message || 'Unable to delete user');
       }
     });
   });
@@ -455,6 +521,81 @@ async function loadAnalytics() {
     </div>
   `;
 }
+
+// Edit modal helpers
+function openEditModal(userId) {
+  const modal = document.getElementById('editUserModal');
+  if (!modal) return;
+  // clear
+  document.getElementById('editName').value = '';
+  document.getElementById('editEmail').value = '';
+  document.getElementById('editShopName').value = '';
+  document.getElementById('editPlan').value = '';
+  document.getElementById('editExpires').value = '';
+  document.getElementById('editStatus').value = 'active';
+
+  // fetch user
+  AdminAPI.users.get(userId).then(res => {
+    if (!res?.success) {
+      alert(res?.message || 'Unable to load user');
+      return;
+    }
+    const u = res.data;
+    document.getElementById('editName').value = u.name || '';
+    document.getElementById('editEmail').value = u.email || '';
+    document.getElementById('editShopName').value = u.shop_name || '';
+    document.getElementById('editPlan').value = u.subscription_plan || '';
+    document.getElementById('editExpires').value = u.subscription_expires_at || '';
+    document.getElementById('editStatus').value = u.status || 'active';
+    modal.dataset.userid = userId;
+    modal.style.display = 'flex';
+  }).catch(err => alert('Unable to load user'));
+}
+
+function closeEditModal() {
+  const modal = document.getElementById('editUserModal');
+  if (!modal) return;
+  modal.style.display = 'none';
+  delete modal.dataset.userid;
+}
+
+// hook up modal events
+document.addEventListener('click', (e) => {
+  const target = e.target;
+  if (target && target.id === 'editCancel') {
+    e.preventDefault();
+    closeEditModal();
+  }
+});
+
+document.getElementById('editUserForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const modal = document.getElementById('editUserModal');
+  if (!modal) return;
+  const userId = modal.dataset.userid;
+  if (!userId) return alert('No user selected');
+
+  const payload = {
+    name: document.getElementById('editName').value.trim() || undefined,
+    email: document.getElementById('editEmail').value.trim() || undefined,
+    shop_name: document.getElementById('editShopName').value.trim() || undefined,
+    subscription_plan: document.getElementById('editPlan').value.trim() || undefined,
+    subscription_expires_at: document.getElementById('editExpires').value.trim() || undefined,
+    status: document.getElementById('editStatus').value || undefined,
+  };
+
+  // remove undefined keys
+  Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+
+  const res = await AdminAPI.users.update(userId, payload);
+  if (res?.success) {
+    alert('User updated');
+    closeEditModal();
+    loadUsers();
+  } else {
+    alert(res?.message || 'Unable to update user');
+  }
+});
 
 function loadSettings() {
   document.getElementById('content').innerHTML = `

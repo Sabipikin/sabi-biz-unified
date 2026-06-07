@@ -44,9 +44,33 @@ router.get('/users/:id', async (req, res, next) => {
   }
 });
 
+// Update user (admin)
+router.put('/users/:id', async (req, res, next) => {
+  try {
+    const updates = req.body || {};
+    const actorId = req.user && req.user.id ? req.user.id : null;
+    const user = await adminService.updateUser(req.params.id, updates, actorId);
+    res.json({ success: true, data: user });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Delete (soft) user
+router.delete('/users/:id', async (req, res, next) => {
+  try {
+    const actorId = req.user && req.user.id ? req.user.id : null;
+    const result = await adminService.deleteUser(req.params.id, actorId);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/users/:id/suspend', async (req, res, next) => {
   try {
-    const user = await adminService.suspendUser(req.params.id);
+    const actorId = req.user && req.user.id ? req.user.id : null;
+    const user = await adminService.suspendUserWithAudit(req.params.id, actorId);
     res.json({ success: true, data: user });
   } catch (err) {
     next(err);
@@ -57,7 +81,8 @@ router.post('/users/:id/activate', async (req, res, next) => {
   try {
     // body may include { days: number } or { expires_at: ISOString }
     const opts = req.body || {};
-    const user = await adminService.activateUser(req.params.id, opts);
+    const actorId = req.user && req.user.id ? req.user.id : null;
+    const user = await adminService.activateUserWithAudit(req.params.id, opts, actorId);
     res.json({ success: true, data: user });
   } catch (err) {
     next(err);

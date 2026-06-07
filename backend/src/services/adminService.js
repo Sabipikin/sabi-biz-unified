@@ -1,6 +1,9 @@
 // backend/src/services/adminService.js
 
 const { query } = require('../config/db');
+const logger = require('../config/logger');
+const { ValidationError } = require('../utils/errors');
+const { v4: uuidv4 } = require('uuid');
 
 class AdminService {
   async getDashboardOverview() {
@@ -84,6 +87,90 @@ class AdminService {
     return result.rows[0];
   }
 
+  async updateUser(id, updates = {}, actorId = null) {
+    const allowed = ['name', 'email', 'phone', 'shop_name', 'subscription_plan', 'subscription_status', 'status', 'subscription_expires_at'];
+    const fields = [];
+    const values = [];
+    let idx = 1;
+
+    for (const key of allowed) {
+      if (updates[key] !== undefined) {
+        fields.push(`${key} = $${idx}`);
+        values.push(updates[key]);
+        idx += 1;
+      }
+    }
+
+    // Validation
+    if (updates.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(updates.email)) {
+      throw new ValidationError('Invalid email address');
+    }
+
+    if (updates.status && !['active', 'suspended', 'deleted'].includes(updates.status)) {
+      throw new ValidationError('Invalid status');
+    }
+
+    if (updates.subscription_expires_at) {
+      const d = new Date(updates.subscription_expires_at);
+      if (Number.isNaN(d.getTime())) throw new ValidationError('Invalid subscription_expires_at date');
+    }
+
+    if (!fields.length) {
+      // nothing to update
+      return this.getUserById(id);
+    }
+
+    const sql = `UPDATE users SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${idx} RETURNING id, email, name, shop_name, subscription_plan, subscription_status, subscription_expires_at, status`;
+    values.push(id);
+
+    const result = await query(sql, values);
+    if (result.rows.length === 0) throw new Error('User not found');
+    const updated = result.rows[0];
+
+    // Record admin audit (best effort)
+    try {
+      await this.recordAdminAudit(actorId, 'update_user', id, { updates: Object.keys(updates) });
+    } catch (e) {
+      logger.warn('Failed to record admin audit for updateUser', { error: e.message });
+    }
+
+    return result.rows[0];
+  }
+
+  async deleteUser(id, actorId = null) {
+    // Soft-delete: mark status = 'deleted' and clear sensitive fields
+    const result = await query(
+      `UPDATE users SET status = 'deleted', email = NULL, name = NULL, phone = NULL, updated_at = NOW() WHERE id = $1 RETURNING id`,
+      [id]
+    );
+
+    if (result.rows.length === 0) throw new Error('User not found');
+    // Optionally remove subscriptions
+    await query('DELETE FROM subscriptions WHERE user_id = $1', [id]);
+    const out = { id: result.rows[0].id, deleted: true };
+    try {
+      await this.recordAdminAudit(actorId, 'delete_user', id, { deleted: true });
+    } catch (e) {
+      logger.warn('Failed to record admin audit for deleteUser', { error: e.message });
+    }
+    return out;
+  }
+
+  async recordAdminAudit(actorId, action, targetUserId = null, details = {}) {
+    // best-effort insert into admin_audit table; if table doesn't exist, just log
+    try {
+      const id = uuidv4();
+      await query(
+        `INSERT INTO admin_audit (id, actor_id, action, target_user_id, details, created_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [id, actorId, action, targetUserId, JSON.stringify(details)]
+      );
+    } catch (err) {
+      // if admin_audit table doesn't exist or insert fails, fall back to logger
+      logger.info('[admin_audit] %s by %s on %s -- %o', action, actorId || 'system', targetUserId || '-', details);
+    }
+  }
+
   async suspendUser(id) {
     const result = await query(
       `UPDATE users SET status = 'suspended', updated_at = NOW()
@@ -97,6 +184,16 @@ class AdminService {
     }
 
     return result.rows[0];
+  }
+
+  async suspendUserWithAudit(id, actorId = null) {
+    const user = await this.suspendUser(id);
+    try {
+      await this.recordAdminAudit(actorId, 'suspend_user', id, { status: user.status });
+    } catch (e) {
+      logger.warn('Failed to record admin audit for suspendUser', { error: e.message });
+    }
+    return user;
   }
 
   /**
@@ -127,8 +224,19 @@ class AdminService {
       throw new Error('User not found');
     }
 
-    return result.rows[0];
+      const user = result.rows[0];
+      return user;
   }
+
+    async activateUserWithAudit(id, expiresAt = null, actorId = null) {
+      const user = await this.activateUser(id, expiresAt);
+      try {
+        await this.recordAdminAudit(actorId, 'activate_user', id, { expiresAt: user.subscription_expires_at });
+      } catch (e) {
+        logger.warn('Failed to record admin audit for activateUser', { error: e.message });
+      }
+      return user;
+    }
 
   async listSubscriptions() {
     const result = await query(
