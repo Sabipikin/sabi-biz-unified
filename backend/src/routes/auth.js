@@ -81,6 +81,17 @@ router.get('/me', authMiddleware, async (req, res, next) => {
   }
 });
 
+// Refresh access token
+router.post('/refresh', async (req, res, next) => {
+  try {
+    const { refreshToken } = req.body || {};
+    const result = authService.refreshAccessToken(refreshToken);
+    res.json({ success: true, token: result.token, refreshToken: result.refreshToken });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.put('/me', authMiddleware, async (req, res, next) => {
   try {
     const user = await authService.updateProfile(req.user.userId, req.body);

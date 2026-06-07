@@ -90,9 +90,10 @@ exports.register = async ({ name, email, password, phone }) => {
 
     const user = result.rows[0];
     const token = this.generateJWT(user.id, user.email, user.role);
+    const refreshToken = this.generateRefreshToken(user.id);
 
     logger.info(`User registered with 14-day trial: ${normalizedEmail}`);
-    return { user, token };
+    return { user, token, refreshToken };
   } catch (err) {
     if (client) {
       try {
@@ -146,7 +147,8 @@ exports.login = async ({ email, password }) => {
       );
 
       logger.info(`Admin logged in: ${normalizedEmail}`);
-
+      const token = this.generateJWT(admin.id, admin.email, admin.role);
+      const refreshToken = this.generateRefreshToken(admin.id);
       return {
         user: {
           id: admin.id,
@@ -155,7 +157,8 @@ exports.login = async ({ email, password }) => {
           role: admin.role,
           account_type: 'admin',
         },
-        token: this.generateJWT(admin.id, admin.email, admin.role),
+        token,
+        refreshToken,
       };
     }
 
@@ -187,6 +190,7 @@ exports.login = async ({ email, password }) => {
 
     // Generate JWT
     const token = this.generateJWT(user.id, user.email, user.role);
+    const refreshToken = this.generateRefreshToken(user.id);
 
     return {
       user: {
@@ -198,6 +202,7 @@ exports.login = async ({ email, password }) => {
         subscription_plan: user.subscription_plan,
       },
       token,
+      refreshToken,
     };
   } catch (err) {
     logger.error('Login error:', err);
@@ -217,6 +222,44 @@ exports.generateJWT = (userId, email, role = 'user') => {
       expiresIn: process.env.JWT_EXPIRES_IN || '7d',
     }
   );
+};
+
+/**
+ * Generate a refresh token (JWT) — long lived
+ */
+exports.generateRefreshToken = (userId) => {
+  return jwt.sign(
+    { userId },
+    process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET,
+    {
+      algorithm: process.env.JWT_ALGORITHM || 'HS256',
+      expiresIn: process.env.REFRESH_EXPIRES_IN || '30d',
+    }
+  );
+};
+
+/**
+ * Exchange a refresh token for a new access token (and optional new refresh token)
+ */
+exports.refreshAccessToken = (refreshToken) => {
+  try {
+    if (!refreshToken) throw new ValidationError('No refresh token provided');
+    const payload = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET, {
+      algorithms: [process.env.JWT_ALGORITHM || 'HS256'],
+    });
+
+    const userId = payload.userId || payload.user_id;
+    if (!userId) throw new ValidationError('Invalid refresh token');
+
+    // Optionally issue a new refresh token as well
+    const newAccess = exports.generateJWT(userId, payload.email || '', payload.role || 'user');
+    const newRefresh = exports.generateRefreshToken(userId);
+
+    return { token: newAccess, refreshToken: newRefresh };
+  } catch (err) {
+    logger.warn('Refresh token verification failed:', err.message);
+    throw new ValidationError('Invalid or expired refresh token');
+  }
 };
 
 /**

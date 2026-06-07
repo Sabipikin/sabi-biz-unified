@@ -3,24 +3,40 @@
 
 console.log('SabiBiz Frontend Loading...');
 
-function resolveApiBaseUrl() {
-  const configuredUrl =
-    window.SABIBIZ_API_BASE_URL ||
-    localStorage.getItem('SABIBIZ_API_BASE_URL') ||
-    '';
+function normalizeApiBaseUrl(url) {
+  return String(url || '').trim().replace(/\/+$/, '');
+}
 
-  if (configuredUrl.trim()) {
-    return configuredUrl.replace(/\/+$/, '');
+function uniqueApiBaseUrls(urls) {
+  return [...new Set(urls.map(normalizeApiBaseUrl).filter(Boolean))];
+}
+
+function resolveApiBaseUrls() {
+  const configuredUrls = uniqueApiBaseUrls([
+    window.SABIBIZ_API_BASE_URL,
+    localStorage.getItem('SABIBIZ_API_BASE_URL'),
+  ]);
+
+  if (configuredUrls.length > 0) {
+    return uniqueApiBaseUrls([
+      ...configuredUrls,
+      'https://sabi-biz-backend.onrender.com',
+      'https://sabibiz.onrender.com',
+    ]);
   }
 
   if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-    return 'http://localhost:3000';
+    return ['http://localhost:3000'];
   }
 
-  return 'https://sabi-biz-backend.onrender.com';
+  return [
+    'https://sabi-biz-backend.onrender.com',
+    'https://sabibiz.onrender.com',
+  ];
 }
 
-const API_BASE = resolveApiBaseUrl();
+const API_BASES = resolveApiBaseUrls();
+let API_BASE = API_BASES[0];
 const app = document.getElementById('app');
 const defaultRoute = '#/dashboard';
 const pendingRouteKey = 'SABIBIZ_PENDING_ROUTE';
@@ -36,6 +52,7 @@ const dashboardRoutes = new Set([
   'settings',
 ]);
 const authRoutes = new Set(['login', 'register']);
+const authFallbackEndpoints = new Set(['/api/auth/login', '/api/auth/register']);
 
 const API = {
   baseURL: API_BASE,
@@ -51,29 +68,64 @@ const API = {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    let response;
-    try {
-      response = await fetch(`${API_BASE}${endpoint}`, {
-        ...options,
-        headers,
-      });
-    } catch (err) {
-      return { success: false, message: err?.message || 'Network error' };
+    const candidateBases = authFallbackEndpoints.has(endpoint) ? API_BASES : [API_BASE];
+    let lastResult = null;
+
+    for (let index = 0; index < candidateBases.length; index += 1) {
+      const baseUrl = candidateBases[index];
+      let response;
+
+      try {
+        response = await fetch(`${baseUrl}${endpoint}`, {
+          ...options,
+          headers,
+        });
+      } catch (err) {
+        lastResult = { success: false, message: err?.message || 'Network error', apiBaseUrl: baseUrl };
+        if (authFallbackEndpoints.has(endpoint) && index < candidateBases.length - 1) {
+          console.warn(`API request failed on ${baseUrl}; trying fallback backend.`);
+          continue;
+        }
+        return lastResult;
+      }
+
+      let payload;
+      try {
+        payload = await response.json();
+      } catch (err) {
+        payload = { success: response.ok, message: response.statusText || '' };
+      }
+
+      lastResult = { ...payload, apiBaseUrl: baseUrl, status: response.status };
+
+      if (response.ok && baseUrl !== API_BASE) {
+        API_BASE = baseUrl;
+        API.baseURL = baseUrl;
+        localStorage.setItem('SABIBIZ_API_BASE_URL', baseUrl);
+      }
+
+      if (response && response.status === 401) {
+        localStorage.removeItem('token');
+        window.location.hash = '#/login';
+      }
+
+      if (
+        authFallbackEndpoints.has(endpoint) &&
+        response.status === 404 &&
+        index < candidateBases.length - 1
+      ) {
+        console.warn(`Auth endpoint not found on ${baseUrl}; trying fallback backend.`);
+        continue;
+      }
+
+      return lastResult;
     }
 
-    let payload;
-    try {
-      payload = await response.json();
-    } catch (err) {
-      payload = { success: response.ok, message: response.statusText || '' };
-    }
-
-    if (response && response.status === 401) {
-      localStorage.removeItem('token');
-      window.location.hash = '#/login';
-    }
-
-    return payload;
+    return {
+      ...(lastResult || {}),
+      success: false,
+      message: `Auth endpoint was not found on any configured backend. Tried: ${candidateBases.join(', ')}`,
+    };
   },
 
   auth: {
