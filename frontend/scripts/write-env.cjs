@@ -5,7 +5,7 @@ const apiBaseUrl =
   process.env.API_BASE_URL ||
   process.env.BACKEND_URL ||
   process.env.VITE_API_BASE_URL ||
-  'https://sabibiz.onrender.com';
+  'https://sabi-biz-backend.onrender.com';
 const appUrl =
   process.env.APP_URL ||
   process.env.SABIBIZ_APP_URL ||

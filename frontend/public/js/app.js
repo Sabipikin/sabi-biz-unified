@@ -17,7 +17,7 @@ function resolveApiBaseUrl() {
     return 'http://localhost:3000';
   }
 
-  return 'https://sabibiz.onrender.com';
+  return 'https://sabi-biz-backend.onrender.com';
 }
 
 const API_BASE = resolveApiBaseUrl();
