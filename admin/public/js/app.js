@@ -244,16 +244,22 @@ async function loadUsers() {
     return;
   }
 
-  const rows = response.data.map(user => `
+  const rows = response.data.map(user => {
+    const actionBtn = user.status === 'suspended'
+      ? `<button class="btn-primary" data-action="activate" data-id="${user.id}">Activate</button>`
+      : `<button class="btn-secondary" data-action="suspend" data-id="${user.id}">Suspend</button>`;
+
+    return `
     <tr>
       <td>${user.email}</td>
       <td>${user.shop_name || '-'}</td>
       <td>${user.subscription_plan || 'free'}</td>
       <td><span class="status-badge ${user.status}">${user.status}</span></td>
       <td>${new Date(user.created_at).toLocaleDateString()}</td>
-      <td><button class="btn-secondary" data-action="suspend" data-id="${user.id}">Suspend</button></td>
+      <td>${actionBtn}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   document.getElementById('content').innerHTML = `
     <div class="admin-section">
@@ -284,6 +290,28 @@ async function loadUsers() {
         loadUsers();
       } else {
         alert(result?.message || 'Unable to suspend user');
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-action="activate"]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const userId = button.dataset.id;
+      // Ask admin for number of days to activate (optional)
+      const daysStr = window.prompt('Activate user for how many days? Leave blank for indefinite activation (no expiry).', '14');
+      if (daysStr === null) return; // cancelled
+      const days = daysStr.trim() === '' ? undefined : Number(daysStr);
+
+      const payload = {};
+      if (!isNaN(days) && days > 0) payload.days = days;
+
+      const result = await AdminAPI.users.activate(userId, payload);
+      if (result?.success) {
+        button.textContent = 'Activated';
+        button.disabled = true;
+        loadUsers();
+      } else {
+        alert(result?.message || 'Unable to activate user');
       }
     });
   });

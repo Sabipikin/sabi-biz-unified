@@ -43,6 +43,12 @@ const app = express();
 const httpServer = createServer(app);
 const PORT = process.env.PORT || 3000;
 
+// When running behind a proxy/load-balancer (Render, Netlify, etc.) the
+// 'X-Forwarded-For' header will be present. express-rate-limit expects the
+// Express `trust proxy` setting to be enabled in that case, otherwise it will
+// throw a ValidationError. Enable trust proxy in most hosted environments.
+app.set('trust proxy', true);
+logger.info(`Express trust proxy set: ${app.get('trust proxy')}`);
 function csvEnv(name) {
   return (process.env[name] || '')
     .split(',')

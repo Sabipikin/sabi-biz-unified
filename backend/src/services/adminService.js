@@ -99,6 +99,37 @@ class AdminService {
     return result.rows[0];
   }
 
+  /**
+   * Activate a user. Options: { days } or { expires_at }
+   * If days provided, set subscription_expires_at to NOW() + days
+   * Also ensures `status` and `subscription_status` are active.
+   */
+  async activateUser(id, opts = {}) {
+    let expiresAt = null;
+
+    if (opts.expires_at) {
+      expiresAt = new Date(opts.expires_at);
+    } else if (opts.days && Number(opts.days) > 0) {
+      const d = new Date();
+      d.setDate(d.getDate() + Number(opts.days));
+      expiresAt = d;
+    }
+
+    const result = await query(
+      `UPDATE users
+       SET status = 'active', subscription_status = 'active', subscription_expires_at = COALESCE($2, subscription_expires_at), updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, email, name, status, subscription_status, subscription_expires_at`,
+      [id, expiresAt]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('User not found');
+    }
+
+    return result.rows[0];
+  }
+
   async listSubscriptions() {
     const result = await query(
       `SELECT id, user_id, plan, status, payment_method, created_at, updated_at

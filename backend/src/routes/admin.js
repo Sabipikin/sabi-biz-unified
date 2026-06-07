@@ -53,6 +53,17 @@ router.post('/users/:id/suspend', async (req, res, next) => {
   }
 });
 
+router.post('/users/:id/activate', async (req, res, next) => {
+  try {
+    // body may include { days: number } or { expires_at: ISOString }
+    const opts = req.body || {};
+    const user = await adminService.activateUser(req.params.id, opts);
+    res.json({ success: true, data: user });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/subscriptions', async (req, res, next) => {
   try {
     const subscriptions = await adminService.listSubscriptions();
