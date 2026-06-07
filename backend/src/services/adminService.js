@@ -61,7 +61,7 @@ class AdminService {
 
   async getUsers() {
     const result = await query(
-      `SELECT id, email, name, shop_name, subscription_plan, status, created_at
+      `SELECT id, email, name, shop_name, subscription_plan, subscription_status, subscription_expires_at, status, created_at
        FROM users
        ORDER BY created_at DESC
        LIMIT 100`
@@ -71,7 +71,7 @@ class AdminService {
 
   async getUserById(id) {
     const result = await query(
-      `SELECT id, email, name, shop_name, subscription_plan, status, created_at
+      `SELECT id, email, name, shop_name, subscription_plan, subscription_status, subscription_expires_at, status, created_at
        FROM users
        WHERE id = $1`,
       [id]
