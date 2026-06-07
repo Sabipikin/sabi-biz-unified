@@ -1,37 +1,13 @@
-# Sabi Biz Unified - Mobile App (Future)
+# SabiReply Mobile (scaffold)
 
-This directory will contain the mobile application when ready.
+This folder contains the Expo + React Native TypeScript scaffold for SabiReply.
 
-## Options
+Quick start:
 
-### React Native
-- Cross-platform (iOS + Android)
-- Share code with web
-- Native performance
-- Expo for easier setup
+1. cd mobile
+2. npm install
+3. npx expo start
 
-### Flutter
-- Cross-platform (iOS + Android)
-- High performance
-- Rich UI components
-- Separate from web codebase
-
-## Timeline
-
-Mobile app development will begin after:
-1. ✅ Unified web app is complete
-2. ✅ Backend API is stable
-3. ✅ All features are working
-4. ⏳ Core team decides on framework
-
-## Getting Started (When Ready)
-
-```bash
-# Create React Native app
-npx create-expo-app mobile
-
-# Or Flutter
-flutter create mobile
-```
-
-See parent README for connection details.
+Notes:
+- Configure `.env` or environment variables before building.
+- The scaffold includes providers, Axios API client, React Query, Zustand auth store, and placeholder screens.
