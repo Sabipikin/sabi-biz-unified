@@ -5,7 +5,7 @@ const apiBaseUrl =
   process.env.API_BASE_URL ||
   process.env.BACKEND_URL ||
   process.env.VITE_API_BASE_URL ||
-  'https://sabi-biz-backend.onrender.com';
+  'https://sabibiz.onrender.com';
 
 const outputPath = path.join(__dirname, '..', 'public', 'env.js');
 const content = `window.SABIBIZ_API_BASE_URL = ${JSON.stringify(apiBaseUrl)};\n`;
