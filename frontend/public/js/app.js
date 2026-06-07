@@ -43,6 +43,9 @@ const pendingRouteKey = 'SABIBIZ_PENDING_ROUTE';
 const sidebarStateKey = 'SABIBIZ_SIDEBAR_COLLAPSED';
 const dashboardRoutes = new Set([
   'dashboard',
+  'inbox',
+  'ai',
+  'campaigns',
   'sales',
   'invoices',
   'inventory',
@@ -218,10 +221,26 @@ const API = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+    accounts: () => API.request('/api/whatsapp/accounts'),
+    createAccount: (data) => API.request('/api/whatsapp/accounts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    updateAccount: (id, data) => API.request(`/api/whatsapp/accounts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+    deleteAccount: (id) => API.request(`/api/whatsapp/accounts/${id}`, {
+      method: 'DELETE',
+    }),
   },
 
   conversations: {
     list: () => API.request('/api/conversations'),
+    create: (data) => API.request('/api/conversations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
     detail: (id) => API.request(`/api/conversations/${id}`),
     assign: (id, data = {}) => API.request(`/api/conversations/${id}/assign`, {
       method: 'POST',
@@ -231,10 +250,29 @@ const API = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+    close: (id) => API.request(`/api/conversations/${id}/close`, {
+      method: 'POST',
+    }),
+    resumeAi: (id) => API.request(`/api/conversations/${id}/resume-ai`, {
+      method: 'POST',
+    }),
+    addNote: (id, data) => API.request(`/api/conversations/${id}/notes`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  },
+
+  ai: {
+    settings: () => API.request('/api/ai/settings'),
+    saveSettings: (data) => API.request('/api/ai/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   },
 
   analytics: {
     metrics: () => API.request('/api/analytics'),
+    customerIntelligence: () => API.request('/api/analytics/customer-intelligence'),
   },
 
   subscriptions: {
@@ -290,11 +328,13 @@ function setSidebarCollapsed(collapsed) {
 function applyNavIconLabels() {
   const labels = {
     dashboard: 'D',
+    inbox: 'IN',
+    ai: 'AI',
+    campaigns: 'CA',
     invoices: 'I',
     inventory: 'N',
     sales: 'S',
     customers: 'C',
-    whatsapp: 'W',
     subscriptions: 'P',
     settings: 'G',
   };
@@ -835,6 +875,14 @@ function renderDashboardShell() {
             <span class="nav-icon">📊</span>
             <span>Dashboard</span>
           </a>
+          <a href="#/inbox" data-route="inbox" class="nav-item">
+            <span class="nav-icon">IN</span>
+            <span>Inbox</span>
+          </a>
+          <a href="#/ai" data-route="ai" class="nav-item">
+            <span class="nav-icon">AI</span>
+            <span>AI Assistant</span>
+          </a>
           <a href="#/invoices" data-route="invoices" class="nav-item">
             <span class="nav-icon">📄</span>
             <span>Invoices</span>
@@ -851,9 +899,9 @@ function renderDashboardShell() {
             <span class="nav-icon">👥</span>
             <span>Customers</span>
           </a>
-          <a href="#/whatsapp" data-route="whatsapp" class="nav-item">
-            <span class="nav-icon">💬</span>
-            <span>WhatsApp</span>
+          <a href="#/campaigns" data-route="campaigns" class="nav-item">
+            <span class="nav-icon">CA</span>
+            <span>Campaigns</span>
           </a>
           <a href="#/subscriptions" data-route="subscriptions" class="nav-item">
             <span class="nav-icon">🎁</span>
@@ -1114,7 +1162,13 @@ async function navigateDashboard(route) {
   setActiveRoute(route);
   content.innerHTML = '<div class="panel"><p>Loading...</p></div>';
 
-  if (route === 'invoices') {
+  if (route === 'inbox' || route === 'whatsapp') {
+    await renderInbox();
+  } else if (route === 'ai') {
+    await renderAiAssistant();
+  } else if (route === 'campaigns') {
+    await renderCampaigns();
+  } else if (route === 'invoices') {
     await renderInvoices();
   } else if (route === 'inventory') {
     await renderInventory();
@@ -1126,8 +1180,6 @@ async function navigateDashboard(route) {
     } else {
       await renderCustomers();
     }
-  } else if (route === 'whatsapp') {
-    await renderWhatsApp();
   } else if (route === 'subscriptions') {
     await renderSubscriptions();
   } else if (route === 'settings') {
@@ -3734,6 +3786,10 @@ async function renderWhatsApp() {
   }
 }
 
+async function renderInbox() {
+  await renderWhatsApp();
+}
+
 function renderConversationList(conversations, selectedId) {
   if (!conversations.length) {
     return '<div class="empty-state">No active chats.</div>';
@@ -3778,6 +3834,42 @@ async function loadConversationDetail(conversationId) {
     }
   });
 
+  document.getElementById('resumeAiConversation')?.addEventListener('click', async () => {
+    const result = await API.conversations.resumeAi(conversation.id);
+    if (result?.success) {
+      notify('AI resumed for this conversation.');
+      await renderInbox();
+    } else {
+      notify(result?.message || 'Unable to resume AI.', 'error');
+    }
+  });
+
+  document.getElementById('closeConversation')?.addEventListener('click', async () => {
+    const result = await API.conversations.close(conversation.id);
+    if (result?.success) {
+      notify('Conversation resolved.');
+      await renderInbox();
+    } else {
+      notify(result?.message || 'Unable to close conversation.', 'error');
+    }
+  });
+
+  document.getElementById('internalNoteForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const note = document.getElementById('internalNoteText').value.trim();
+    if (!note) {
+      notify('Note cannot be empty.', 'error');
+      return;
+    }
+    const result = await API.conversations.addNote(conversation.id, { note });
+    if (result?.success) {
+      notify('Internal note added.');
+      await loadConversationDetail(conversation.id);
+    } else {
+      notify(result?.message || 'Unable to add note.', 'error');
+    }
+  });
+
   document.getElementById('conversationReplyForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const submitButton = event.currentTarget.querySelector('button[type="submit"]');
@@ -3802,6 +3894,8 @@ async function loadConversationDetail(conversationId) {
 
 function renderConversationDetail(conversation) {
   const messages = conversation.messages || [];
+  const notes = Array.isArray(conversation.internal_notes) ? conversation.internal_notes : [];
+  const tags = Array.isArray(conversation.tags) ? conversation.tags : [];
   const latestAi = (conversation.ai_interactions || [])[0];
   const invoiceDraft = latestAi?.invoice_draft;
 
@@ -3813,7 +3907,20 @@ function renderConversationDetail(conversation) {
       </div>
       <div class="button-row conversation-actions">
         <span class="status ${escapeHtml(conversation.status || 'active')}">${escapeHtml(conversation.status || 'active')}</span>
-        <button type="button" id="assignConversation" class="btn secondary">Human takeover</button>
+        <button type="button" id="assignConversation" class="btn secondary">Take Over</button>
+        <button type="button" id="resumeAiConversation" class="btn secondary">Resume AI</button>
+        <button type="button" id="closeConversation" class="btn secondary">Close</button>
+      </div>
+    </div>
+    <div class="conversation-side-panel">
+      <div>
+        <h4>Customer Profile</h4>
+        <p>${escapeHtml(conversation.customer_email || conversation.customer_phone || conversation.external_contact_phone || '-')}</p>
+        <p>AI: ${conversation.ai_enabled === false ? 'Paused' : 'Active'} | Handoff: ${escapeHtml(conversation.human_state || 'ai_active')}</p>
+      </div>
+      <div>
+        <h4>Tags</h4>
+        <p>${tags.length ? tags.map(tag => `<span class="status">${escapeHtml(tag)}</span>`).join(' ') : 'No tags yet'}</p>
       </div>
     </div>
     ${invoiceDraft ? renderInvoiceDraft(invoiceDraft) : ''}
@@ -3829,6 +3936,14 @@ function renderConversationDetail(conversation) {
       <textarea id="conversationReplyText" rows="4" required placeholder="Type a human reply..."></textarea>
       <button type="submit" class="btn-primary">Send reply</button>
     </form>
+    <form id="internalNoteForm" class="conversation-reply">
+      <textarea id="internalNoteText" rows="3" required placeholder="Add an internal note..."></textarea>
+      <button type="submit" class="btn-secondary">Add note</button>
+    </form>
+    <div class="internal-notes">
+      <h4>Internal Notes</h4>
+      ${notes.length ? notes.map(note => `<p>${escapeHtml(note.note || '')}<br><small>${formatDate(note.created_at)}</small></p>`).join('') : '<p>No internal notes yet.</p>'}
+    </div>
   `;
 }
 
@@ -3941,9 +4056,143 @@ function renderSubscriptionTable(subscriptions) {
   `;
 }
 
+async function renderAiAssistant() {
+  const response = await API.ai.settings();
+  const settings = getResponseData(response, {});
+  const error = getResponseError(response, 'AI settings could not be loaded.');
+
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>AI Assistant</h2>
+          <p>Configure how SabiBiz responds, escalates, and speaks with customers in WhatsApp conversations.</p>
+        </div>
+      </div>
+      ${error ? renderSectionError(error) : ''}
+      <form id="aiSettingsForm" class="settings-card wide-card">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="aiAssistantName">Assistant Name</label>
+            <input id="aiAssistantName" name="assistant_name" value="${escapeHtml(settings.assistant_name || 'Sabi Assistant')}" required>
+          </div>
+          <div class="form-group">
+            <label for="aiBusinessCategory">Business Category</label>
+            <input id="aiBusinessCategory" name="business_category" value="${escapeHtml(settings.business_category || '')}" placeholder="Retail, fashion, electronics...">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="aiBusinessContext">Business Description</label>
+          <textarea id="aiBusinessContext" name="business_context" rows="5" placeholder="Products, pricing rules, delivery policy, refund policy...">${escapeHtml(settings.business_context || '')}</textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="aiTone">Tone</label>
+            <select id="aiTone" name="tone">
+              ${['Friendly', 'Professional', 'Sales-focused'].map(tone => `<option value="${tone}" ${settings.tone === tone ? 'selected' : ''}>${tone}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="aiLanguage">Language</label>
+            <select id="aiLanguage" name="language">
+              ${['English', 'Pidgin', 'Yoruba', 'Hausa', 'Igbo'].map(language => `<option value="${language}" ${settings.language === language ? 'selected' : ''}>${language}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="form-row checkbox-row">
+          <div class="form-group checkbox-group">
+            <label>
+              <input id="aiEnabled" name="enabled" type="checkbox" ${settings.enabled !== false ? 'checked' : ''}>
+              <span>AI assistant enabled</span>
+            </label>
+          </div>
+          <div class="form-group checkbox-group">
+            <label>
+              <input id="aiEscalationEnabled" name="escalation_enabled" type="checkbox" ${settings.escalation_enabled !== false ? 'checked' : ''}>
+              <span>Human escalation enabled</span>
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="aiEscalationKeywords">Escalation Keywords</label>
+          <input id="aiEscalationKeywords" name="escalation_keywords" value="${escapeHtml((settings.escalation_keywords || ['human', 'agent', 'complaint', 'refund']).join(', '))}">
+        </div>
+        <button type="submit" class="btn-primary">Save AI Settings</button>
+      </form>
+    </div>
+  `;
+
+  document.getElementById('aiSettingsForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submitButton = form.querySelector('button[type="submit"]');
+    const data = Object.fromEntries(new FormData(form).entries());
+    data.enabled = document.getElementById('aiEnabled').checked;
+    data.escalation_enabled = document.getElementById('aiEscalationEnabled').checked;
+    data.escalation_keywords = String(data.escalation_keywords || '').split(',').map(item => item.trim()).filter(Boolean);
+    setButtonLoading(submitButton, true, 'Saving...');
+    const result = await API.ai.saveSettings(data);
+    setButtonLoading(submitButton, false);
+    if (getResponseData(result, null)) {
+      notify('AI assistant settings saved.');
+    } else {
+      notify(getResponseError(result, 'Unable to save AI settings.'), 'error');
+    }
+  });
+}
+
+async function renderCampaigns() {
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Campaigns</h2>
+          <p>Broadcasts and segmented WhatsApp campaigns are coming soon.</p>
+        </div>
+      </div>
+      <div class="empty-state">Campaigns will use the same customer intelligence, WhatsApp accounts, and AI settings already prepared in this phase.</div>
+    </div>
+  `;
+}
+
+function renderWhatsAppAccounts(accounts = []) {
+  if (!accounts.length) {
+    return '<div class="empty-state">No WhatsApp numbers connected yet.</div>';
+  }
+
+  return `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Number</th>
+            <th>Status</th>
+            <th>Phone Number ID</th>
+            <th>Connected</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${accounts.map(account => `
+            <tr>
+              <td>${escapeHtml(account.display_phone_number || '-')}</td>
+              <td><span class="status ${escapeHtml(account.status || 'pending')}">${escapeHtml(account.status || 'pending')}</span></td>
+              <td>${escapeHtml(account.phone_number_id || '-')}</td>
+              <td>${account.connected_at ? formatDate(account.connected_at) : '-'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 async function renderSettings() {
-  const response = await API.auth.me();
+  const [response, accountsRes] = await Promise.all([
+    API.auth.me(),
+    API.whatsapp.accounts(),
+  ]);
   const user = response?.data || {};
+  const accounts = getResponseData(accountsRes, []);
   const theme = getThemePreference();
 
   document.getElementById('content').innerHTML = `
@@ -3951,7 +4200,7 @@ async function renderSettings() {
       <div class="panel-header">
         <div>
           <h2>Settings</h2>
-          <p>Manage your profile, password, and display preferences.</p>
+          <p>Manage your profile, WhatsApp connection readiness, password, and display preferences.</p>
         </div>
       </div>
       <div class="settings-grid">
@@ -3992,6 +4241,13 @@ async function renderSettings() {
           </div>
           <button type="submit" class="btn-primary">Update Password</button>
         </form>
+
+        <div class="settings-card">
+          <h3>WhatsApp</h3>
+          <p class="form-help">Business verification is pending. Account records live here so Embedded Signup can be connected later without global WhatsApp tokens.</p>
+          <button type="button" id="connectWhatsappSoon" class="btn-primary" disabled>Connect WhatsApp (Coming Soon)</button>
+          ${renderWhatsAppAccounts(accounts)}
+        </div>
 
         <div class="settings-card">
           <h3>Appearance</h3>

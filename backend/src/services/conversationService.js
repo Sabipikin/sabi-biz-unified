@@ -42,8 +42,9 @@ class ConversationService {
 
     result.rows.forEach(row => {
       if (row.status === 'active') summary.active_chats += 1;
+      if (row.status === 'open') summary.active_chats += 1;
       if (row.ai_status === 'ai_handled') summary.ai_handled_chats += 1;
-      if (row.ai_status === 'human_takeover' || row.status === 'needs_human') summary.human_takeover += 1;
+      if (row.ai_status === 'human_takeover' || row.status === 'needs_human' || row.human_state === 'human_assigned' || row.human_state === 'human_escalated') summary.human_takeover += 1;
       summary.unread_messages += Number(row.unread_count || 0);
     });
 
@@ -51,6 +52,46 @@ class ConversationService {
       summary,
       conversations: result.rows,
     };
+  }
+
+  async create(userId, data = {}) {
+    const externalPhone = String(data.external_contact_phone || data.phone || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
+    if (!externalPhone) {
+      throw new Error('Customer phone is required');
+    }
+
+    let customerId = data.customer_id || null;
+    if (!customerId && data.customer_name) {
+      const customerResult = await query(
+        `INSERT INTO customers (user_id, name, phone, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())
+         RETURNING id`,
+        [userId, data.customer_name, externalPhone]
+      );
+      customerId = customerResult.rows[0]?.id || null;
+    }
+
+    const result = await query(
+      `INSERT INTO conversations (
+         user_id, customer_id, whatsapp_account_id, channel, external_contact_phone,
+         contact_name, status, ai_status, assigned_to, ai_enabled, human_state,
+         last_message_at, unread_count, metadata, created_at, updated_at
+       )
+       VALUES ($1, $2, $3, 'whatsapp', $4, $5, 'open', 'ai_handled', $6, $7, 'ai_active',
+               NOW(), 0, $8::jsonb, NOW(), NOW())
+       RETURNING *`,
+      [
+        userId,
+        customerId,
+        data.whatsapp_account_id || null,
+        externalPhone,
+        data.contact_name || data.customer_name || null,
+        data.assigned_to || null,
+        data.ai_enabled !== false,
+        JSON.stringify(data.metadata || {}),
+      ]
+    );
+    return result.rows[0];
   }
 
   async getById(userId, conversationId) {
@@ -108,10 +149,72 @@ class ConversationService {
        SET assigned_to = COALESCE($1, $2),
            ai_status = 'human_takeover',
            status = 'needs_human',
+           human_state = 'human_assigned',
+           ai_enabled = false,
            updated_at = NOW()
        WHERE id = $3 AND user_id = $2
        RETURNING *`,
       [assignedTo, userId, conversationId]
+    );
+    return result.rows[0] || null;
+  }
+
+  async close(userId, conversationId) {
+    const result = await query(
+      `UPDATE conversations
+       SET status = 'resolved',
+           human_state = CASE WHEN human_state = 'ai_active' THEN human_state ELSE 'human_assigned' END,
+           updated_at = NOW()
+       WHERE id = $1 AND user_id = $2
+       RETURNING *`,
+      [conversationId, userId]
+    );
+    return result.rows[0] || null;
+  }
+
+  async resumeAi(userId, conversationId) {
+    const result = await query(
+      `UPDATE conversations
+       SET ai_status = 'ai_handled',
+           status = 'open',
+           human_state = 'ai_active',
+           ai_enabled = true,
+           updated_at = NOW()
+       WHERE id = $1 AND user_id = $2
+       RETURNING *`,
+      [conversationId, userId]
+    );
+    return result.rows[0] || null;
+  }
+
+  async addNote(userId, conversationId, note) {
+    const payload = {
+      note,
+      user_id: userId,
+      created_at: new Date().toISOString(),
+    };
+    const result = await query(
+      `UPDATE conversations
+       SET internal_notes = internal_notes || $1::jsonb,
+           updated_at = NOW()
+       WHERE id = $2 AND user_id = $3
+       RETURNING *`,
+      [JSON.stringify([payload]), conversationId, userId]
+    );
+    return result.rows[0] || null;
+  }
+
+  async updateTags(userId, conversationId, tags = []) {
+    const normalized = Array.isArray(tags)
+      ? tags.map(tag => String(tag).trim()).filter(Boolean).slice(0, 12)
+      : String(tags).split(',').map(tag => tag.trim()).filter(Boolean).slice(0, 12);
+    const result = await query(
+      `UPDATE conversations
+       SET tags = $1::text[],
+           updated_at = NOW()
+       WHERE id = $2 AND user_id = $3
+       RETURNING *`,
+      [normalized, conversationId, userId]
     );
     return result.rows[0] || null;
   }
@@ -139,10 +242,12 @@ class ConversationService {
     await query(
       `UPDATE conversations
        SET ai_status = $1,
-           status = 'active',
+           status = 'open',
+           human_state = $2,
+           ai_enabled = $3,
            updated_at = NOW()
-       WHERE id = $2 AND user_id = $3`,
-      [useAI ? 'ai_handled' : 'human_takeover', conversationId, userId]
+       WHERE id = $4 AND user_id = $5`,
+      [useAI ? 'ai_handled' : 'human_takeover', useAI ? 'ai_active' : 'human_assigned', useAI, conversationId, userId]
     );
 
     return storedMessage;

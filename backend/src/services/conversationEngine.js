@@ -1,7 +1,7 @@
-const axios = require('axios');
 const { query, getClient } = require('../config/db');
 const logger = require('../config/logger');
 const aiContextGenerator = require('./aiContextGenerator');
+const conversationAIService = require('./ConversationAIService');
 
 function normalizePhone(phone = '') {
   return String(phone || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
@@ -113,13 +113,22 @@ class ConversationEngine {
 
     if (phoneNumberId) {
       const byPhoneNumberId = await query(
+        `SELECT user_id AS id FROM whatsapp_accounts
+         WHERE phone_number_id = $1 AND status = 'connected'
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [phoneNumberId]
+      );
+      if (byPhoneNumberId.rows[0]) return byPhoneNumberId.rows[0].id;
+
+      const legacyByPhoneNumberId = await query(
         `SELECT id FROM users
          WHERE whatsapp_phone_number_id = $1 OR whatsapp_phone = $1
          ORDER BY updated_at DESC
          LIMIT 1`,
         [phoneNumberId]
       );
-      if (byPhoneNumberId.rows[0]) return byPhoneNumberId.rows[0].id;
+      if (legacyByPhoneNumberId.rows[0]) return legacyByPhoneNumberId.rows[0].id;
     }
 
     if (displayPhone) {
@@ -182,7 +191,7 @@ class ConversationEngine {
   async findOrCreateConversation(userId, customer, phone, contact = {}) {
     const existing = await query(
       `SELECT * FROM conversations
-       WHERE user_id = $1 AND channel = 'whatsapp' AND external_contact_phone = $2 AND status != 'closed'
+       WHERE user_id = $1 AND channel = 'whatsapp' AND external_contact_phone = $2 AND status NOT IN ('closed', 'resolved', 'archived')
        ORDER BY updated_at DESC
        LIMIT 1`,
       [userId, phone]
@@ -192,9 +201,9 @@ class ConversationEngine {
     const result = await query(
       `INSERT INTO conversations (
          user_id, customer_id, channel, external_contact_phone, contact_name,
-         status, ai_status, last_message_at, unread_count, metadata, created_at, updated_at
+         status, ai_status, ai_enabled, human_state, last_message_at, unread_count, metadata, created_at, updated_at
        )
-       VALUES ($1, $2, 'whatsapp', $3, $4, 'active', 'ai_handled', NOW(), 0, $5::jsonb, NOW(), NOW())
+       VALUES ($1, $2, 'whatsapp', $3, $4, 'open', 'ai_handled', true, 'ai_active', NOW(), 0, $5::jsonb, NOW(), NOW())
        RETURNING *`,
       [
         userId,
@@ -207,24 +216,24 @@ class ConversationEngine {
     return result.rows[0];
   }
 
-  async addMessage({ userId, conversationId, direction, senderType, messageText, externalMessageId = null, isRead = true, metadata = {} }) {
+  async addMessage({ userId, conversationId, direction, senderType, messageText, externalMessageId = null, isRead = true, metadata = {}, messageType = 'text' }) {
     const client = await getClient();
     try {
       await client.query('BEGIN');
       const messageResult = await client.query(
         `INSERT INTO conversation_messages (
            conversation_id, user_id, direction, sender_type, message_text,
-           external_message_id, is_read, metadata, created_at
+           external_message_id, is_read, metadata, message_type, ai_generated, created_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, NOW())
          RETURNING *`,
-        [conversationId, userId, direction, senderType, messageText, externalMessageId, isRead, JSON.stringify(metadata)]
+        [conversationId, userId, direction, senderType, messageText, externalMessageId, isRead, JSON.stringify(metadata), messageType, senderType === 'ai']
       );
 
       const unreadIncrement = direction === 'inbound' && !isRead ? 1 : 0;
       await client.query(
         `UPDATE conversations
-         SET last_message_at = NOW(),
+       SET last_message_at = NOW(),
              unread_count = unread_count + $1,
              updated_at = NOW()
          WHERE id = $2 AND user_id = $3`,
@@ -260,7 +269,12 @@ class ConversationEngine {
       model = aiConfig?.model || process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
       if (apiKey) {
-        responseText = await this.callOpenAi({ apiKey, model, prompt, context });
+        const providerResult = await conversationAIService.generateReply({
+          config: { apiKey, model },
+          prompt,
+          context,
+        });
+        responseText = providerResult.text;
       }
     } catch (err) {
       status = 'fallback';
@@ -278,7 +292,11 @@ class ConversationEngine {
     if (escalated) {
       await query(
         `UPDATE conversations
-         SET ai_status = 'human_takeover', status = 'needs_human', updated_at = NOW()
+         SET ai_status = 'human_takeover',
+             status = 'needs_human',
+             human_state = 'human_escalated',
+             ai_enabled = false,
+             updated_at = NOW()
          WHERE id = $1 AND user_id = $2`,
         [conversationId, userId]
       );
@@ -319,33 +337,21 @@ class ConversationEngine {
     };
   }
 
-  async callOpenAi({ apiKey, model, prompt, context }) {
-    const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-      model,
-      messages: [
-        { role: 'system', content: prompt },
-        { role: 'user', content: JSON.stringify(context) },
-      ],
-      temperature: 0.4,
-      max_tokens: 450,
-    }, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 15000,
-    });
-
-    return response.data?.choices?.[0]?.message?.content?.trim() || '';
-  }
-
   async getAiConfig(userId) {
     const result = await query(
-      `SELECT u.openai_api_key, COALESCE(a.model, 'gpt-4o-mini') AS model,
-              COALESCE(a.temperature, 0.7) AS temperature,
-              COALESCE(a.enabled, u.ai_enabled, true) AS enabled
+      `SELECT u.openai_api_key,
+              COALESCE(c.model, 'gpt-4o-mini') AS model,
+              COALESCE(c.temperature, 0.7) AS temperature,
+              COALESCE(s.enabled, c.enabled, u.ai_enabled, true) AS enabled,
+              s.assistant_name,
+              s.business_context,
+              s.tone,
+              s.language,
+              s.escalation_enabled,
+              s.escalation_keywords
        FROM users u
-       LEFT JOIN ai_configs a ON a.user_id = u.id
+       LEFT JOIN ai_configs c ON c.user_id = u.id
+       LEFT JOIN ai_settings s ON s.user_id = u.id
        WHERE u.id = $1
        LIMIT 1`,
       [userId]
@@ -358,9 +364,9 @@ class ConversationEngine {
       `INSERT INTO ai_interactions (
          conversation_id, conversation_message_id, user_id, customer_id,
          provider, model, intent, prompt, context, response_text,
-         invoice_draft, escalated, status, error_message, created_at
+         invoice_draft, escalated, status, error_message, response, created_at
        )
-       VALUES ($1, $2, $3, $4, 'openai', $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11, $12, $13, NOW())
+       VALUES ($1, $2, $3, $4, 'openai', $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11, $12, $13, $9, NOW())
        RETURNING *`,
       [
         conversationId,

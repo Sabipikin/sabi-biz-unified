@@ -5,6 +5,7 @@ const { query } = require('../config/db');
 const logger = require('../config/logger');
 const { v4: uuidv4 } = require('uuid');
 const conversationEngine = require('./conversationEngine');
+const whatsappAccountService = require('./whatsappAccountService');
 
 class WhatsAppService {
   async handleWebhook(payload) {
@@ -70,9 +71,10 @@ class WhatsAppService {
 
     logger.info(`Stored outgoing WhatsApp message to ${formattedPhone}`);
 
-    if (process.env.WHATSAPP_TOKEN && process.env.PHONE_NUMBER_ID) {
+    const account = await whatsappAccountService.findConnectedForUser(userId);
+    if (account?.access_token && account?.phone_number_id) {
       try {
-        const url = `https://graph.facebook.com/v17.0/${process.env.PHONE_NUMBER_ID}/messages`;
+        const url = `https://graph.facebook.com/v17.0/${account.phone_number_id}/messages`;
         await axios.post(url, {
           messaging_product: 'whatsapp',
           to: formattedPhone,
@@ -80,7 +82,7 @@ class WhatsAppService {
           text: { body: messageText },
         }, {
           headers: {
-            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            Authorization: `Bearer ${account.access_token}`,
             'Content-Type': 'application/json',
           },
         });
@@ -88,6 +90,8 @@ class WhatsAppService {
       } catch (err) {
         logger.error('WhatsApp API send failed:', err.message);
       }
+    } else {
+      logger.info('No connected WhatsApp account found; message stored for later delivery.');
     }
 
     return result.rows[0];

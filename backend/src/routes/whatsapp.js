@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/auth');
 const whatsappService = require('../services/whatsappService');
+const whatsappAccountService = require('../services/whatsappAccountService');
 const logger = require('../config/logger');
 
 // Verify webhook for WhatsApp
@@ -26,6 +27,48 @@ router.post('/webhook', async (req, res, next) => {
   try {
     await whatsappService.handleWebhook(req.body);
     return res.status(200).json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/accounts', authMiddleware, async (req, res, next) => {
+  try {
+    const accounts = await whatsappAccountService.list(req.user.userId);
+    res.json({ success: true, data: accounts });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/accounts', authMiddleware, async (req, res, next) => {
+  try {
+    const account = await whatsappAccountService.create(req.user.userId, req.body);
+    res.status(201).json({ success: true, data: account });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/accounts/:id', authMiddleware, async (req, res, next) => {
+  try {
+    const account = await whatsappAccountService.update(req.user.userId, req.params.id, req.body);
+    if (!account) {
+      return res.status(404).json({ success: false, message: 'WhatsApp account not found' });
+    }
+    res.json({ success: true, data: account });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/accounts/:id', authMiddleware, async (req, res, next) => {
+  try {
+    const account = await whatsappAccountService.remove(req.user.userId, req.params.id);
+    if (!account) {
+      return res.status(404).json({ success: false, message: 'WhatsApp account not found' });
+    }
+    res.json({ success: true, data: account });
   } catch (err) {
     next(err);
   }

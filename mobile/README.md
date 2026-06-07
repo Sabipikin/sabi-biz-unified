@@ -10,4 +10,4 @@ Quick start:
 
 Notes:
 - Configure `.env` or environment variables before building.
-- The scaffold includes providers, Axios API client, React Query, Zustand auth store, and placeholder screens.
+- The scaffold includes providers, Axios API client, React Query, Zustand auth store, Inbox, AI Assistant, Campaigns, and Settings screens wired to the Phase 1 APIs.

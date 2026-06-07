@@ -16,5 +16,20 @@ export const Endpoints = {
   },
   ANALYTICS: {
     DASH: '/api/analytics',
+    CUSTOMER_INTELLIGENCE: '/api/analytics/customer-intelligence',
+  },
+  CONVERSATIONS: {
+    LIST: '/api/conversations',
+    DETAIL: (id: string | string[]) => `/api/conversations/${id}`,
+    REPLY: (id: string | string[]) => `/api/conversations/${id}/reply`,
+    ASSIGN: (id: string | string[]) => `/api/conversations/${id}/assign`,
+    CLOSE: (id: string | string[]) => `/api/conversations/${id}/close`,
+    RESUME_AI: (id: string | string[]) => `/api/conversations/${id}/resume-ai`,
+  },
+  AI: {
+    SETTINGS: '/api/ai/settings',
+  },
+  WHATSAPP: {
+    ACCOUNTS: '/api/whatsapp/accounts',
   },
 };

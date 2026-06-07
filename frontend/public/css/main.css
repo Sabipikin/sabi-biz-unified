@@ -752,6 +752,31 @@ html, body {
   margin: 0;
 }
 
+.conversation-side-panel {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  padding: 12px 18px 0;
+}
+
+.conversation-side-panel > div,
+.internal-notes {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.internal-notes {
+  margin: 0 18px 18px;
+}
+
+.internal-notes p {
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
 .conversation-actions {
   align-items: center;
   flex: 0 0 auto;
@@ -1263,6 +1288,11 @@ html, body {
   border-radius: 8px;
   padding: 20px;
   background: var(--surface-muted);
+}
+
+.settings-card.wide-card,
+.wide-card {
+  max-width: 960px;
 }
 
 .settings-card h3 {

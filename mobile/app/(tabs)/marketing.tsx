@@ -4,8 +4,8 @@ import { View, Text, StyleSheet } from 'react-native';
 export default function MarketingScreen() {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Marketing</Text>
-      <Text>Marketing placeholder</Text>
+      <Text style={styles.title}>Campaigns</Text>
+      <Text>WhatsApp campaigns are coming soon. The account, AI, and customer intelligence foundations are ready for this workflow.</Text>
     </View>
   );
 }
