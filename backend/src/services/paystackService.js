@@ -12,7 +12,7 @@ class PaystackService {
     }
   }
 
-  async initializePayment({ email, amount, plan, userId, currency = 'NGN' }) {
+  async initializePayment({ email, amount, plan, userId, currency = 'NGN', metadata = {} }) {
     if (!PAYSTACK_SECRET) {
       throw new Error('Paystack secret key is not configured');
     }
@@ -34,6 +34,7 @@ class PaystackService {
       amount: Math.round(Number(amount) * 100),
       currency,
       metadata: {
+        ...metadata,
         userId,
         plan,
       },

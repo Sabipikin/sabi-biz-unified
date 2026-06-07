@@ -12,4 +12,5 @@ module.exports = {
   analytics: require('./analytics'),
   conversations: require('./conversations'),
   ai: require('./ai'),
+  billing: require('./billing'),
 };

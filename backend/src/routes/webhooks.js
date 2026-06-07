@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const paystackService = require('../services/paystackService');
 const subscriptionService = require('../services/subscriptionService');
+const billingService = require('../services/billingService');
 
 router.post('/paystack', async (req, res, next) => {
   try {
@@ -18,6 +19,7 @@ router.post('/paystack', async (req, res, next) => {
 
     if (paystackEvent === 'charge.success') {
       await subscriptionService.handlePaystackChargeSuccess(data);
+      await billingService.handleProviderPaymentSuccess(data);
     }
 
     res.json({ success: true });

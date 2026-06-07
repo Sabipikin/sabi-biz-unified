@@ -221,6 +221,7 @@ app.use('/api/admin', routes.admin);
 app.use('/api/analytics', routes.analytics);
 app.use('/api/conversations', routes.conversations);
 app.use('/api/ai', routes.ai);
+app.use('/api/billing', routes.billing);
 
 // ─── SCHEDULED TASKS ────────────────────────────────────────────────────
 // Run database cleanup every hour
