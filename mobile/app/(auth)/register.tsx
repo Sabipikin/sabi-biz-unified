@@ -43,13 +43,46 @@ export default function RegisterScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Create Account</Text>
-      <Input placeholder="Full name" value={undefined} onChangeText={(t) => control.setValue('name', t)} />
-      {formState.errors.name ? <Text style={styles.error}>{String(formState.errors.name?.message)}</Text> : null}
-      <Input placeholder="Email" value={undefined} onChangeText={(t) => control.setValue('email', t)} />
-      {formState.errors.email ? <Text style={styles.error}>{String(formState.errors.email?.message)}</Text> : null}
-      <Input placeholder="Password" secure value={undefined} onChangeText={(t) => control.setValue('password', t)} />
-      {formState.errors.password ? <Text style={styles.error}>{String(formState.errors.password?.message)}</Text> : null}
-      <Input placeholder="Phone (optional)" value={undefined} onChangeText={(t) => control.setValue('phone', t)} />
+      <Controller
+        control={control}
+        name="name"
+        render={({ field: { onChange, value } }) => (
+          <>
+            <Input placeholder="Full name" value={value} onChangeText={onChange} />
+            {formState.errors.name ? <Text style={styles.error}>{String(formState.errors.name?.message)}</Text> : null}
+          </>
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="email"
+        render={({ field: { onChange, value } }) => (
+          <>
+            <Input placeholder="Email" value={value} onChangeText={onChange} />
+            {formState.errors.email ? <Text style={styles.error}>{String(formState.errors.email?.message)}</Text> : null}
+          </>
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="password"
+        render={({ field: { onChange, value } }) => (
+          <>
+            <Input placeholder="Password" secure value={value} onChangeText={onChange} />
+            {formState.errors.password ? <Text style={styles.error}>{String(formState.errors.password?.message)}</Text> : null}
+          </>
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="phone"
+        render={({ field: { onChange, value } }) => (
+          <Input placeholder="Phone (optional)" value={value} onChangeText={onChange} />
+        )}
+      />
       <Button title="Register" onPress={handleSubmit(onSubmit)} />
     </View>
   );

@@ -35,10 +35,27 @@ export default function LoginScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Sign In</Text>
-      <Input placeholder="Email" value={undefined} onChangeText={(t) => control.setValue('email', t)} />
-      {formState.errors.email ? <Text style={styles.error}>{String(formState.errors.email?.message)}</Text> : null}
-      <Input placeholder="Password" secure value={undefined} onChangeText={(t) => control.setValue('password', t)} />
-      {formState.errors.password ? <Text style={styles.error}>{String(formState.errors.password?.message)}</Text> : null}
+      <Controller
+        control={control}
+        name="email"
+        render={({ field: { onChange, onBlur, value } }) => (
+          <>
+            <Input placeholder="Email" value={value} onChangeText={onChange} />
+            {formState.errors.email ? <Text style={styles.error}>{String(formState.errors.email?.message)}</Text> : null}
+          </>
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="password"
+        render={({ field: { onChange, onBlur, value } }) => (
+          <>
+            <Input placeholder="Password" secure value={value} onChangeText={onChange} />
+            {formState.errors.password ? <Text style={styles.error}>{String(formState.errors.password?.message)}</Text> : null}
+          </>
+        )}
+      />
       <Button title="Sign In" onPress={handleSubmit(onSubmit)} />
       <Button title="Register" onPress={() => router.push('/(auth)/register')} />
     </View>
