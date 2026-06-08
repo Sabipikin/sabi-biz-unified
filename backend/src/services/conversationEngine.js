@@ -3,6 +3,7 @@ const logger = require('../config/logger');
 const aiContextGenerator = require('./aiContextGenerator');
 const conversationAIService = require('./ConversationAIService');
 const billingService = require('./billingService');
+const entitlementService = require('./subscriptionEntitlementService');
 
 function normalizePhone(phone = '') {
   return String(phone || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
@@ -256,6 +257,34 @@ class ConversationEngine {
   }
 
   async runAiWorkflow(userId, conversationId, customer, inboundMessage, messageText) {
+    try {
+      await entitlementService.validateAction(userId, {
+        metricType: 'conversations',
+        increment: 1,
+        recommendedPlan: 'growth',
+      });
+    } catch (err) {
+      logger.warn('AI generation blocked by subscription entitlement', { userId, conversationId, error: err.message });
+      await query(
+        `UPDATE conversations
+         SET ai_status = 'human_takeover',
+             status = 'needs_human',
+             human_state = 'human_escalated',
+             ai_enabled = false,
+             updated_at = NOW()
+         WHERE id = $1 AND user_id = $2`,
+        [conversationId, userId]
+      );
+      return {
+        responseText: null,
+        outboundMessage: null,
+        invoiceDraft: null,
+        escalated: true,
+        intent: 'subscription_limit',
+        error: err.message,
+      };
+    }
+
     const context = await aiContextGenerator.generate(userId, customer?.id, conversationId);
     const intent = classifyIntent(messageText);
     const invoiceDraft = intent === 'invoice_draft'

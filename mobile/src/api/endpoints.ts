@@ -12,7 +12,26 @@ export const Endpoints = {
     LIST: '/api/business/customers',
   },
   CAMPAIGNS: {
-    LIST: '/api/marketing/campaigns',
+    LIST: '/api/product/campaigns',
+    TEMPLATES: '/api/product/templates',
+    BROADCASTS: '/api/product/broadcasts',
+    SEGMENTS: '/api/product/segments',
+  },
+  PRODUCT: {
+    SUMMARY: '/api/product/analytics/summary',
+    LEADS: '/api/product/leads',
+    OPPORTUNITIES: '/api/product/opportunities',
+    ACTIVITIES: '/api/product/activities',
+    ASSISTANTS: '/api/product/assistants',
+    KNOWLEDGE: '/api/product/knowledge',
+    WORKFLOWS: '/api/product/workflows',
+    INTEGRATIONS: '/api/product/integrations',
+    WEBHOOKS: '/api/product/webhooks',
+    API_KEYS: '/api/product/api-keys',
+    BRANDING: '/api/product/branding',
+    REPORTS: '/api/product/reports',
+    TEAM: '/api/product/team',
+    TICKETS: '/api/product/tickets',
   },
   ANALYTICS: {
     DASH: '/api/analytics',
@@ -31,6 +50,10 @@ export const Endpoints = {
   },
   WHATSAPP: {
     ACCOUNTS: '/api/whatsapp/accounts',
+    OAUTH_URL: '/api/whatsapp/oauth/url',
+  },
+  WORKFLOWS: {
+    LIST: '/api/workflows',
   },
   BILLING: {
     CURRENT_PLAN: '/api/billing/current-plan',

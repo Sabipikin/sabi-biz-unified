@@ -1,10 +1,11 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TextInput, Button, Alert, Linking } from 'react-native';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../src/api';
 import { Endpoints } from '../../src/api/endpoints';
 
 export default function SettingsScreen() {
+  const queryClient = useQueryClient();
   const { data, isLoading, isError } = useQuery(['me'], async () => {
     const res = await api.get(Endpoints.AUTH.ME);
     return res.data;
@@ -16,6 +17,46 @@ export default function SettingsScreen() {
 
   const me = data?.data || data || null;
   const accounts = accountsQuery.data?.data || [];
+
+  const [showForm, setShowForm] = useState(false);
+  const [displayPhoneNumber, setDisplayPhoneNumber] = useState('');
+  const [phoneNumberId, setPhoneNumberId] = useState('');
+  const [accessToken, setAccessToken] = useState('');
+
+  const createMutation = useMutation(async (payload: any) => {
+    const res = await api.post(Endpoints.WHATSAPP.ACCOUNTS, payload);
+    return res.data;
+  }, {
+    onSuccess: () => {
+      queryClient.invalidateQueries(['whatsapp-accounts']);
+      setShowForm(false);
+      setDisplayPhoneNumber('');
+      setPhoneNumberId('');
+      setAccessToken('');
+    }
+  });
+
+  const deleteMutation = useMutation(async (id: string) => {
+    const res = await api.delete(`${Endpoints.WHATSAPP.ACCOUNTS}/${id}`);
+    return res.data;
+  }, {
+    onSuccess: () => queryClient.invalidateQueries(['whatsapp-accounts'])
+  });
+
+  const handleCreate = () => {
+    if (!displayPhoneNumber || !phoneNumberId) {
+      Alert.alert('Validation', 'Phone number and Phone Number ID are required');
+      return;
+    }
+    createMutation.mutate({ display_phone_number: displayPhoneNumber, phone_number_id: phoneNumberId, access_token: accessToken, status: 'connected' });
+  };
+
+  const handleDelete = (id: string) => {
+    Alert.alert('Confirm', 'Remove this WhatsApp account?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => deleteMutation.mutate(id) }
+    ]);
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -31,14 +72,51 @@ export default function SettingsScreen() {
       ) : null}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>WhatsApp</Text>
-        <Text style={styles.field}>Connect WhatsApp (Coming Soon)</Text>
-        {accounts.length ? accounts.map((account: any) => (
-          <View key={account.id} style={styles.account}>
-            <Text style={styles.accountName}>{account.display_phone_number || 'WhatsApp number'}</Text>
-            <Text>Status: {account.status}</Text>
-            <Text>Phone Number ID: {account.phone_number_id || '-'}</Text>
+        <Text style={styles.field}>Manage connected WhatsApp numbers</Text>
+        <Button title={showForm ? 'Cancel' : 'Connect WhatsApp (Manual)'} onPress={() => setShowForm(s => !s)} />
+        <View style={{ marginTop: 8 }} />
+        <Button title="Connect via Meta (OAuth)" onPress={async () => {
+          try {
+            const res = await api.get(Endpoints.WHATSAPP.OAUTH_URL);
+            const url = res?.data?.url || res?.url || null;
+            if (!url) {
+              Alert.alert('Error', 'Unable to build OAuth URL.');
+              return;
+            }
+            Linking.openURL(url);
+          } catch (err) {
+            Alert.alert('Error', 'Failed to start OAuth flow.');
+          }
+        }} />
+
+        {showForm ? (
+          <View style={{ marginTop: 12 }}>
+            <TextInput placeholder="Display phone number (e.g. +2348012345678)" value={displayPhoneNumber} onChangeText={setDisplayPhoneNumber} style={styles.input} />
+            <TextInput placeholder="Phone Number ID" value={phoneNumberId} onChangeText={setPhoneNumberId} style={styles.input} />
+            <TextInput placeholder="Access Token (paste temporary)" value={accessToken} onChangeText={setAccessToken} style={styles.input} secureTextEntry={true} />
+            <Button title={createMutation.isLoading ? 'Connecting...' : 'Connect'} onPress={handleCreate} />
           </View>
-        )) : <Text>No WhatsApp numbers connected yet.</Text>}
+        ) : null}
+
+        {accounts.length ? accounts.map((account: any) => {
+          const history = Array.isArray(account.connection_history) ? account.connection_history : [];
+          const lastEvent = history.length ? history[history.length - 1] : null;
+          const connectedAt = account.connected_at ? new Date(account.connected_at) : null;
+          const now = new Date();
+          const healthy = account.status === 'connected' && connectedAt && ((now.getTime() - connectedAt.getTime()) / (1000 * 60 * 60 * 24) < 30);
+
+          return (
+            <View key={account.id} style={styles.account}>
+              <Text style={styles.accountName}>{account.display_phone_number || 'WhatsApp number'}</Text>
+              <Text>Status: {account.status} {healthy ? '- Healthy' : ''}</Text>
+              <Text>Phone Number ID: {account.phone_number_id || '-'}</Text>
+              {lastEvent ? <Text>Last: {lastEvent.status} @ {new Date(lastEvent.at).toLocaleString()}</Text> : null}
+              <View style={{ marginTop: 8 }}>
+                <Button title="Disconnect" onPress={() => handleDelete(account.id)} />
+              </View>
+            </View>
+          );
+        }) : <Text>No WhatsApp numbers connected yet.</Text>}
       </View>
     </ScrollView>
   );
@@ -50,6 +128,7 @@ const styles = StyleSheet.create({
   field: { marginBottom: 8 },
   section: { marginTop: 20 },
   sectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginBottom: 8, backgroundColor: '#fff' },
   account: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 8 },
   accountName: { fontWeight: '700', marginBottom: 4 },
 });

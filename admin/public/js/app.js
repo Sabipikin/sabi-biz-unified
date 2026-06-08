@@ -26,6 +26,8 @@ function renderShell() {
           <a href="#/payments" data-route="payments">Payments</a>
           <a href="#/analytics" data-route="analytics">Analytics</a>
           <a href="#/settings" data-route="settings">Settings</a>
+          <a href="#/whatsapp" data-route="whatsapp">WhatsApp Numbers</a>
+          <a href="#/automation" data-route="automation">Automation</a>
           <button type="button" class="btn-logout" onclick="adminLogout()">Logout</button>
         </div>
       </nav>
@@ -75,6 +77,31 @@ function renderShell() {
       </div>
     </div>
   `;
+
+  // WhatsApp logs modal appended to DOM for admin flows
+  const logsModal = document.createElement('div');
+  logsModal.id = 'whatsappLogsModal';
+  logsModal.className = 'modal';
+  logsModal.style.display = 'none';
+  logsModal.style.position = 'fixed';
+  logsModal.style.inset = '0';
+  logsModal.style.background = 'rgba(0,0,0,0.4)';
+  logsModal.style.alignItems = 'center';
+  logsModal.style.justifyContent = 'center';
+  logsModal.innerHTML = `
+    <div style="background:#fff; padding:16px; width:760px; max-width:95%; border-radius:8px;">
+      <h3>WhatsApp Connection Logs</h3>
+      <div id="whatsappLogsContent" style="max-height:420px; overflow:auto; font-family:monospace; font-size:13px;"></div>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+        <button id="closeWhatsappLogs" class="btn-secondary">Close</button>
+      </div>
+    </div>
+  `;
+  // ensure single modal
+  const existing = document.getElementById('whatsappLogsModal');
+  if (existing) existing.remove();
+  document.body.appendChild(logsModal);
+  document.getElementById('closeWhatsappLogs').addEventListener('click', () => { document.getElementById('whatsappLogsModal').style.display = 'none'; });
 }
 
 function renderLogin() {
@@ -100,6 +127,9 @@ function renderLogin() {
       </div>
     </div>
   `;
+
+  // WhatsApp logs modal
+  
 
   setupPasswordToggles();
 
@@ -653,11 +683,125 @@ async function navigate() {
     case 'settings':
       loadSettings();
       break;
+    case 'whatsapp':
+      await loadWhatsappAccounts();
+      break;
+    case 'automation':
+      await loadAutomation();
+      break;
+      break;
     case 'dashboard':
     default:
       await loadDashboard();
       break;
   }
+}
+
+async function loadWhatsappAccounts() {
+  renderLoading('Loading WhatsApp accounts...');
+
+  const response = await AdminAPI.whatsapp.accounts();
+  if (!response?.success) {
+    document.getElementById('content').innerHTML = '<p class="error">Unable to load WhatsApp accounts.</p>';
+    return;
+  }
+
+  const rows = response.data.map(acc => {
+    const connectedAt = acc.connected_at ? new Date(acc.connected_at).toLocaleString() : '-';
+    return `
+      <tr>
+        <td>${acc.owner_email || '-'}<br/><small>${acc.user_id}</small></td>
+        <td>${acc.display_phone_number || '-'}</td>
+        <td>${acc.phone_number_id || '-'}</td>
+        <td>${acc.status}</td>
+        <td>${connectedAt}</td>
+        <td>
+          <button class="btn-primary" data-action="view-logs" data-id="${acc.id}">View Logs</button>
+          <button class="btn-danger" data-action="remove-account" data-id="${acc.id}">Remove</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="admin-section">
+      <h2>Connected WhatsApp Numbers</h2>
+      <p>Manage WhatsApp Business Accounts connected by customers.</p>
+      <div style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
+        <button id="connectWhatsappOauth" class="btn-primary">Connect via Meta (OAuth)</button>
+        <small style="color:#666;">Opens Meta consent in a new tab for connecting a WhatsApp Business account</small>
+      </div>
+      <table class="admin-table">
+        <thead>
+          <tr><th>Owner</th><th>Display Number</th><th>Phone ID</th><th>Status</th><th>Connected At</th><th>Action</th></tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="6" class="text-center">No WhatsApp numbers connected.</td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+
+  document.querySelectorAll('[data-action="view-logs"]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.id;
+      const res = await AdminAPI.whatsapp.accountLogs(id);
+      const contentEl = document.getElementById('whatsappLogsContent');
+      if (!res?.success) {
+        contentEl.textContent = 'Unable to load logs.';
+      } else {
+        const logs = Array.isArray(res.data) ? res.data : [];
+        contentEl.innerHTML = logs.map(l => `<div style="padding:8px;border-bottom:1px solid #eee;"><strong>${l.status}</strong> — ${l.note || ''} <br/><small>${new Date(l.at).toLocaleString()}</small></div>`).join('') || '<div class="text-center">No logs</div>';
+      }
+      document.getElementById('whatsappLogsModal').style.display = 'flex';
+    });
+  });
+
+  document.querySelectorAll('[data-action="remove-account"]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.id;
+      if (!window.confirm('Remove this WhatsApp account? This will disconnect it for the tenant.')) return;
+      const res = await AdminAPI.whatsapp.removeAccount(id);
+      if (res?.success) {
+        alert('Removed');
+        loadWhatsappAccounts();
+      } else {
+        alert(res?.message || 'Unable to remove account');
+      }
+    });
+  });
+
+  const connectBtn = document.getElementById('connectWhatsappOauth');
+  if (connectBtn) {
+    connectBtn.addEventListener('click', () => {
+      const url = `${AdminAPI.baseURL.replace(/\/$/, '')}/api/whatsapp/oauth/start`;
+      window.open(url, '_blank', 'noopener');
+    });
+  }
+}
+
+async function loadAutomation() {
+  renderLoading('Loading automation...');
+  const res = await AdminAPI.request('/api/workflows');
+  const items = res?.data || [];
+  document.getElementById('content').innerHTML = `
+    <div class="admin-section">
+      <h2>Automation</h2>
+      <p>Manage automation workflows</p>
+      <div>
+        <button id="createWorkflow" class="btn-primary">Create Workflow</button>
+      </div>
+      <div style="margin-top:12px;">
+        ${items.length ? '<ul>' + items.map(w => `<li>${w.name} — ${w.status}</li>`).join('') + '</ul>' : '<p>No workflows yet</p>'}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('createWorkflow').addEventListener('click', async () => {
+    const name = window.prompt('Workflow name');
+    if (!name) return;
+    const payload = { name, description: '', status: 'draft' };
+    const r = await AdminAPI.request('/api/workflows', { method: 'POST', body: JSON.stringify(payload) });
+    if (r?.success) loadAutomation(); else alert(r?.message || 'Unable to create');
+  });
 }
 
 function initializeAdminUI() {

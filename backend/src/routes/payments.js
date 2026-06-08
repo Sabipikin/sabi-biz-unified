@@ -6,7 +6,7 @@ const subscriptionService = require('../services/subscriptionService');
 const billingService = require('../services/billingService');
 
 const PLAN_PRICING = {
-  starter: 10000,
+  starter: 3000,
   growth: 25000,
   business: 60000,
 };

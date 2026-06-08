@@ -60,7 +60,7 @@ async function seedDatabase() {
     await query(
       `INSERT INTO subscriptions (id, user_id, plan, payment_method, status, amount, currency, billing_cycle, next_billing_date, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW() + INTERVAL '30 days', NOW())`,
-      [uuidv4(), userId, 'starter', 'paystack', 'active', 2990, 'NGN', 'monthly']
+      [uuidv4(), userId, 'starter', 'paystack', 'active', 3000, 'NGN', 'monthly']
     );
 
     logger.info('✓ Created sample subscription');

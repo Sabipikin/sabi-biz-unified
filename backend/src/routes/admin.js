@@ -135,4 +135,32 @@ router.get('/analytics/billing', async (req, res, next) => {
   }
 });
 
+// WhatsApp accounts management (admin)
+router.get('/whatsapp/accounts', async (req, res, next) => {
+  try {
+    const accounts = await adminService.getWhatsappAccounts();
+    res.json({ success: true, data: accounts });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/whatsapp/accounts/:id/logs', async (req, res, next) => {
+  try {
+    const logs = await adminService.getWhatsappAccountLogs(req.params.id);
+    res.json({ success: true, data: logs });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/whatsapp/accounts/:id', async (req, res, next) => {
+  try {
+    const result = await adminService.removeWhatsappAccount(req.params.id, req.user && req.user.id);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

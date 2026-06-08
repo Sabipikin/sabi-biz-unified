@@ -160,6 +160,8 @@ app.get('/live', (req, res) => {
 // ─── BODY PARSING ───────────────────────────────────────────────────────
 // Raw body for webhook signature verification (Paystack, PayPal)
 app.use('/api/webhooks', express.raw({ type: 'application/json' }));
+// Also accept raw body for WhatsApp webhook so we can verify X-Hub-Signature-256
+app.use('/api/whatsapp/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -221,7 +223,9 @@ app.use('/api/admin', routes.admin);
 app.use('/api/analytics', routes.analytics);
 app.use('/api/conversations', routes.conversations);
 app.use('/api/ai', routes.ai);
+app.use('/api/workflows', routes.workflows);
 app.use('/api/billing', routes.billing);
+app.use('/api/product', routes.product);
 
 // ─── SCHEDULED TASKS ────────────────────────────────────────────────────
 // Run database cleanup every hour

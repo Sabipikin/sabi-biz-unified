@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/auth');
-const { checkSubscription, checkUsageLimit } = require('../middleware/subscription');
+const { checkSubscription, checkPlanFeature, checkUsageLimit, enforceWritableWorkspace } = require('../middleware/subscription');
 const conversationService = require('../services/conversationService');
 
-router.get('/', authMiddleware, async (req, res, next) => {
+router.get('/', authMiddleware, checkPlanFeature('shared_inbox'), async (req, res, next) => {
   try {
     const result = await conversationService.list(req.user.userId);
     res.json({ success: true, data: result });
@@ -13,7 +13,7 @@ router.get('/', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.get('/:id', authMiddleware, async (req, res, next) => {
+router.get('/:id', authMiddleware, checkPlanFeature('shared_inbox'), async (req, res, next) => {
   try {
     const conversation = await conversationService.getById(req.user.userId, req.params.id);
     if (!conversation) {
@@ -34,7 +34,7 @@ router.post('/', authMiddleware, checkSubscription, async (req, res, next) => {
   }
 });
 
-router.post('/:id/assign', authMiddleware, async (req, res, next) => {
+router.post('/:id/assign', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const conversation = await conversationService.assign(req.user.userId, req.params.id, req.body.assignedTo || null);
     if (!conversation) {
@@ -46,7 +46,7 @@ router.post('/:id/assign', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/:id/close', authMiddleware, async (req, res, next) => {
+router.post('/:id/close', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const conversation = await conversationService.close(req.user.userId, req.params.id);
     if (!conversation) {
@@ -58,7 +58,7 @@ router.post('/:id/close', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/:id/resume-ai', authMiddleware, async (req, res, next) => {
+router.post('/:id/resume-ai', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const conversation = await conversationService.resumeAi(req.user.userId, req.params.id);
     if (!conversation) {
@@ -70,7 +70,7 @@ router.post('/:id/resume-ai', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/:id/notes', authMiddleware, async (req, res, next) => {
+router.post('/:id/notes', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const note = String(req.body.note || '').trim();
     if (!note) {
@@ -86,7 +86,7 @@ router.post('/:id/notes', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.put('/:id/tags', authMiddleware, async (req, res, next) => {
+router.put('/:id/tags', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const conversation = await conversationService.updateTags(req.user.userId, req.params.id, req.body.tags || []);
     if (!conversation) {

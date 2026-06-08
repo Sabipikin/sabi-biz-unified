@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/auth');
 const billingService = require('../services/billingService');
+const entitlementService = require('../services/subscriptionEntitlementService');
 
 router.use(authMiddleware);
 
@@ -18,6 +19,15 @@ router.get('/current-plan', async (req, res, next) => {
   try {
     const plan = await billingService.getCurrentPlan(req.user.userId || req.user.id);
     res.json({ success: true, data: plan });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/entitlements', async (req, res, next) => {
+  try {
+    const entitlements = await entitlementService.getEntitlementSummary(req.user.userId || req.user.id);
+    res.json({ success: true, data: entitlements });
   } catch (err) {
     next(err);
   }

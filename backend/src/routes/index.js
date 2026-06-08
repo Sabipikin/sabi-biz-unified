@@ -12,5 +12,7 @@ module.exports = {
   analytics: require('./analytics'),
   conversations: require('./conversations'),
   ai: require('./ai'),
+  workflows: require('./workflows'),
   billing: require('./billing'),
+  product: require('./product'),
 };

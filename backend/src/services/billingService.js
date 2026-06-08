@@ -206,7 +206,7 @@ class BillingService {
     if (!limit || Number(limit) <= 0) return null;
 
     const percent = (used / Number(limit)) * 100;
-    const threshold = percent >= 100 ? '100' : percent >= 80 ? '80' : null;
+    const threshold = percent >= 100 ? '100' : percent >= 95 ? '95' : percent >= 80 ? '80' : null;
     if (!threshold) return null;
 
     const type = `usage_${metricType}_${threshold}`;

@@ -262,6 +262,41 @@ class AdminService {
 
     return result.rows[0];
   }
+
+  // WhatsApp accounts for admin view
+  async getWhatsappAccounts() {
+    const result = await query(
+      `SELECT wa.id, wa.user_id, u.email AS owner_email, wa.display_phone_number, wa.phone_number_id, wa.status, wa.connected_at, wa.connection_history, wa.updated_at
+       FROM whatsapp_accounts wa
+       LEFT JOIN users u ON u.id = wa.user_id
+       ORDER BY wa.connected_at DESC NULLS LAST, wa.updated_at DESC
+       LIMIT 200`
+    );
+    return result.rows;
+  }
+
+  async getWhatsappAccountLogs(id) {
+    const result = await query(
+      `SELECT connection_history FROM whatsapp_accounts WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    if (!result.rows[0]) throw new Error('WhatsApp account not found');
+    return result.rows[0].connection_history || [];
+  }
+
+  async removeWhatsappAccount(id, actorId = null) {
+    const result = await query(
+      `DELETE FROM whatsapp_accounts WHERE id = $1 RETURNING id, user_id, display_phone_number`,
+      [id]
+    );
+    if (!result.rows[0]) throw new Error('WhatsApp account not found');
+    try {
+      await this.recordAdminAudit(actorId, 'remove_whatsapp_account', result.rows[0].user_id, { id: result.rows[0].id, phone: result.rows[0].display_phone_number });
+    } catch (e) {
+      logger.warn('Failed to record admin audit for removeWhatsappAccount', { error: e.message });
+    }
+    return { id: result.rows[0].id, removed: true };
+  }
 }
 
 module.exports = new AdminService();

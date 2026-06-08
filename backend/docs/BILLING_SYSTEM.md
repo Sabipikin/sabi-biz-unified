@@ -29,7 +29,7 @@ Known SaaS plans go through `/api/billing/*`. The legacy `/api/payments/paystack
 ## Plans
 
 - Trial: 14 days, 1 user, 1 WhatsApp number, 100 AI conversations.
-- Starter: NGN 10,000/month, 1 user, 1 WhatsApp number, 1,000 conversations.
+- Starter: NGN 3,000/month, 1 user, 1 WhatsApp number, 1,000 conversations.
 - Growth: NGN 25,000/month, 5 users, 3 WhatsApp numbers, 5,000 conversations.
 - Business: NGN 60,000/month, 20 users, 10 WhatsApp numbers, 20,000 conversations.
 - Enterprise: custom pricing and unlimited/custom limits.

@@ -11,8 +11,18 @@ export default function AiAssistantScreen() {
     const res = await api.get(Endpoints.AI.SETTINGS);
     return res.data;
   });
+  const assistantsQuery = useQuery(['ai-assistants'], async () => {
+    const res = await api.get(Endpoints.PRODUCT.ASSISTANTS);
+    return res.data;
+  });
+  const knowledgeQuery = useQuery(['knowledge-resources'], async () => {
+    const res = await api.get(Endpoints.PRODUCT.KNOWLEDGE);
+    return res.data;
+  });
 
   const settings = data?.data || {};
+  const assistants = assistantsQuery.data?.data || [];
+  const knowledge = knowledgeQuery.data?.data || [];
   const [enabled, setEnabled] = React.useState(settings.enabled !== false);
   const [assistantName, setAssistantName] = React.useState(settings.assistant_name || 'Sabi Assistant');
   const [businessContext, setBusinessContext] = React.useState(settings.business_context || '');
@@ -53,6 +63,24 @@ export default function AiAssistantScreen() {
       <TextInput value={businessContext} onChangeText={setBusinessContext} style={[styles.input, styles.textarea]} multiline />
       <Text style={styles.meta}>Tone: {settings.tone || 'Friendly'} | Language: {settings.language || 'English'}</Text>
       <Button title={saveMutation.isLoading ? 'Saving...' : 'Save AI Settings'} onPress={() => saveMutation.mutate()} disabled={saveMutation.isLoading} />
+
+      <Text style={styles.sectionTitle}>Assistants</Text>
+      {assistants.length ? assistants.map((assistant: any) => (
+        <View key={assistant.id} style={styles.card}>
+          <Text style={styles.cardTitle}>{assistant.name}</Text>
+          <Text>Status: {assistant.status}</Text>
+          <Text>Support: {assistant.support_enabled ? 'On' : 'Off'} | Sales: {assistant.sales_enabled ? 'On' : 'Off'}</Text>
+        </View>
+      )) : <Text style={styles.meta}>No assistants created yet.</Text>}
+
+      <Text style={styles.sectionTitle}>Knowledge Base</Text>
+      {knowledge.length ? knowledge.map((item: any) => (
+        <View key={item.id} style={styles.card}>
+          <Text style={styles.cardTitle}>{item.title}</Text>
+          <Text>{item.resource_type} - {item.index_status}</Text>
+          <Text>{item.category || 'Uncategorized'}</Text>
+        </View>
+      )) : <Text style={styles.meta}>No knowledge resources uploaded yet.</Text>}
     </ScrollView>
   );
 }
@@ -65,4 +93,7 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 8, marginBottom: 12, backgroundColor: '#fff' },
   textarea: { minHeight: 120, textAlignVertical: 'top' },
   meta: { color: '#666', marginBottom: 16 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', marginTop: 20, marginBottom: 8 },
+  card: { backgroundColor: '#fff', borderRadius: 8, padding: 12, marginBottom: 8 },
+  cardTitle: { fontWeight: '700', marginBottom: 4 },
 });

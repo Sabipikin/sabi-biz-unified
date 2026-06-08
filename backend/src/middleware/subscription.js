@@ -1,41 +1,43 @@
-const billingService = require('../services/billingService');
+const entitlementService = require('../services/subscriptionEntitlementService');
 
 function userIdFromReq(req) {
   return req.user?.userId || req.user?.id;
 }
 
+function sendEntitlementError(res, err) {
+  return res.status(err.statusCode || 403).json({
+    success: false,
+    message: err.message || 'Upgrade your plan to continue.',
+    code: err.code,
+    upgrade: err.upgrade,
+  });
+}
+
 async function checkSubscription(req, res, next) {
   try {
-    const subscription = await billingService.getCurrentSubscription(userIdFromReq(req));
+    const subscription = await entitlementService.getCurrentPlan(userIdFromReq(req));
     if (!subscription) {
       return res.status(403).json({ success: false, message: 'Upgrade your plan to continue.' });
     }
 
-    const now = new Date();
-    const expiresAt = subscription.current_period_end || subscription.trial_end;
-    if (['cancelled', 'expired', 'suspended'].includes(subscription.status) || (expiresAt && new Date(expiresAt) < now)) {
+    if (await entitlementService.isReadOnly(userIdFromReq(req))) {
       return res.status(403).json({ success: false, message: 'Upgrade your plan to continue.' });
     }
 
     req.subscription = subscription;
     next();
   } catch (err) {
-    next(err);
+    sendEntitlementError(res, err);
   }
 }
 
 function checkPlanFeature(featureKey) {
   return async (req, res, next) => {
     try {
-      const subscription = req.subscription || await billingService.getCurrentSubscription(userIdFromReq(req));
-      const flags = subscription?.feature_flags || {};
-      if (!flags[featureKey]) {
-        return res.status(403).json({ success: false, message: 'Upgrade your plan to continue.' });
-      }
-      req.subscription = subscription;
+      await entitlementService.validateAction(userIdFromReq(req), { feature: featureKey, featureName: featureKey, mutates: false });
       next();
     } catch (err) {
-      next(err);
+      sendEntitlementError(res, err);
     }
   };
 }
@@ -43,21 +45,27 @@ function checkPlanFeature(featureKey) {
 function checkUsageLimit(metricType) {
   return async (req, res, next) => {
     try {
-      const usage = await billingService.getUsage(userIdFromReq(req));
-      const metric = usage[metricType];
-      if (metric && metric.limit !== null && metric.limit !== undefined && Number(metric.used) >= Number(metric.limit)) {
-        return res.status(403).json({ success: false, message: 'Upgrade your plan to continue.' });
-      }
-      req.usage = usage;
+      req.usage = await entitlementService.getUsage(userIdFromReq(req));
+      await entitlementService.validateAction(userIdFromReq(req), { metricType, increment: 1 });
       next();
     } catch (err) {
-      next(err);
+      sendEntitlementError(res, err);
     }
   };
+}
+
+async function enforceWritableWorkspace(req, res, next) {
+  try {
+    await entitlementService.validateAction(userIdFromReq(req), { mutates: true });
+    next();
+  } catch (err) {
+    sendEntitlementError(res, err);
+  }
 }
 
 module.exports = {
   checkSubscription,
   checkPlanFeature,
   checkUsageLimit,
+  enforceWritableWorkspace,
 };

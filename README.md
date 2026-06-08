@@ -177,7 +177,7 @@ Configured SaaS pricing:
 
 ```text
 trial:      14 days
-starter:    NGN 10,000/month
+starter:    NGN 3,000/month
 growth:     NGN 25,000/month
 business:   NGN 60,000/month
 enterprise: custom pricing

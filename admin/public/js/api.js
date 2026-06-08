@@ -85,6 +85,12 @@ const AdminAPI = {
     subscriptions: () => AdminAPI.request('/api/admin/analytics/subscriptions'),
     billing: () => AdminAPI.request('/api/admin/analytics/billing'),
   },
+  // WhatsApp admin tools
+  whatsapp: {
+    accounts: () => AdminAPI.request('/api/admin/whatsapp/accounts'),
+    accountLogs: (id) => AdminAPI.request(`/api/admin/whatsapp/accounts/${id}/logs`),
+    removeAccount: (id) => AdminAPI.request(`/api/admin/whatsapp/accounts/${id}`, { method: 'DELETE' }),
+  },
 };
 
 // Auth helpers

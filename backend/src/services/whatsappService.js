@@ -6,6 +6,7 @@ const logger = require('../config/logger');
 const { v4: uuidv4 } = require('uuid');
 const conversationEngine = require('./conversationEngine');
 const whatsappAccountService = require('./whatsappAccountService');
+const triggerEngine = require('./triggerEngine');
 
 class WhatsAppService {
   async handleWebhook(payload) {
@@ -32,6 +33,13 @@ class WhatsAppService {
           const contact = contacts.find(item => item.wa_id === message.from) || {};
           await this.saveIncomingMessage(userId, message);
           const workflow = await conversationEngine.handleIncomingWhatsAppMessage(userId, message, contact);
+
+          // Emit message.received trigger for workflows
+          try {
+            triggerEngine.emitTrigger('message.received', { organizationId: userId, userId, message, contact, workflow });
+          } catch (err) {
+            logger.error('Failed to emit message.received trigger', err);
+          }
 
           if (workflow?.aiResult?.responseText) {
             await this.sendMessage(userId, message.from, workflow.aiResult.responseText, true);

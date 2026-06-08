@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const XLSX = require('xlsx');
 const { authMiddleware } = require('../middleware/auth');
+const { enforceWritableWorkspace } = require('../middleware/subscription');
 const businessService = require('../services/businessService');
 
 router.get('/customers', authMiddleware, async (req, res, next) => {
@@ -15,7 +16,7 @@ router.get('/customers', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/customers', authMiddleware, async (req, res, next) => {
+router.post('/customers', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const customer = await businessService.createCustomer(req.user.userId, req.body);
     res.status(201).json({ success: true, data: customer });
@@ -90,7 +91,7 @@ router.get('/milestones/templates', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.put('/milestones/templates', authMiddleware, async (req, res, next) => {
+router.put('/milestones/templates', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const templates = await businessService.saveMilestoneTemplates(req.user.userId, req.body);
     res.json({ success: true, data: templates });
@@ -109,7 +110,7 @@ router.get('/milestones/generate', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/milestones/send', authMiddleware, async (req, res, next) => {
+router.post('/milestones/send', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const { customerId, milestoneType, messageText } = req.body;
     const result = await businessService.sendMilestoneMessage(req.user.userId, customerId, milestoneType, messageText);
@@ -131,7 +132,7 @@ router.get('/customers/:id', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.put('/customers/:id', authMiddleware, async (req, res, next) => {
+router.put('/customers/:id', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const customer = await businessService.updateCustomer(req.user.userId, req.params.id, req.body);
     if (!customer) {
@@ -143,7 +144,7 @@ router.put('/customers/:id', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.delete('/customers/:id', authMiddleware, async (req, res, next) => {
+router.delete('/customers/:id', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const deleted = await businessService.deleteCustomer(req.user.userId, req.params.id);
     if (!deleted) {
@@ -185,7 +186,7 @@ router.get('/invoices/:id', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/invoices', authMiddleware, async (req, res, next) => {
+router.post('/invoices', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const invoice = await businessService.createInvoice(req.user.userId, req.body);
     res.status(201).json({ success: true, data: invoice });
@@ -194,7 +195,7 @@ router.post('/invoices', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.put('/invoices/:id', authMiddleware, async (req, res, next) => {
+router.put('/invoices/:id', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const invoice = await businessService.updateInvoice(req.user.userId, req.params.id, req.body);
     res.json({ success: true, data: invoice });
@@ -203,7 +204,7 @@ router.put('/invoices/:id', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/invoices/:id/send', authMiddleware, async (req, res, next) => {
+router.post('/invoices/:id/send', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const { method } = req.body;
     const result = await businessService.sendInvoice(req.user.userId, req.params.id, method);
@@ -223,7 +224,7 @@ router.get('/inventory', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/inventory', authMiddleware, async (req, res, next) => {
+router.post('/inventory', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const item = await businessService.createInventoryItem(req.user.userId, req.body);
     res.status(201).json({ success: true, data: item });
@@ -241,7 +242,7 @@ router.get('/sales', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/sales', authMiddleware, async (req, res, next) => {
+router.post('/sales', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const sale = await businessService.createSale(req.user.userId, req.body);
     res.status(201).json({ success: true, data: sale });
@@ -250,7 +251,7 @@ router.post('/sales', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/sales/bulk', authMiddleware, async (req, res, next) => {
+router.post('/sales/bulk', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const sales = await businessService.createBulkSales(req.user.userId, req.body);
     res.status(201).json({ success: true, data: sales });
@@ -259,7 +260,7 @@ router.post('/sales/bulk', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.put('/sales/:id', authMiddleware, async (req, res, next) => {
+router.put('/sales/:id', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const sale = await businessService.updateSale(req.user.userId, req.params.id, req.body);
     res.json({ success: true, data: sale });
@@ -268,7 +269,7 @@ router.put('/sales/:id', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.delete('/sales/:id', authMiddleware, async (req, res, next) => {
+router.delete('/sales/:id', authMiddleware, enforceWritableWorkspace, async (req, res, next) => {
   try {
     const result = await businessService.deleteSale(req.user.userId, req.params.id);
     res.json({ success: true, data: result });

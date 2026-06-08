@@ -9,6 +9,7 @@ export default function Layout() {
       <Tabs.Screen name="(tabs)/marketing" options={{ title: 'Marketing' }} />
       <Tabs.Screen name="(tabs)/analytics" options={{ title: 'Analytics' }} />
       <Tabs.Screen name="(tabs)/settings" options={{ title: 'Settings' }} />
+      <Tabs.Screen name="(tabs)/automation" options={{ title: 'Automation' }} />
     </Tabs>
   );
 }
