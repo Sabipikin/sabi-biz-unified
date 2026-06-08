@@ -173,12 +173,14 @@ Subscription support includes:
 - User subscription plan/status update after successful payment.
 - Subscription payment invoice creation.
 
-Configured Paystack pricing:
+Configured SaaS pricing:
 
 ```text
-starter: NGN 2,990
-growth:  NGN 4,990
-pro:     NGN 9,990
+trial:      14 days
+starter:    NGN 10,000/month
+growth:     NGN 25,000/month
+business:   NGN 60,000/month
+enterprise: custom pricing
 ```
 
 ### Analytics
@@ -276,6 +278,15 @@ Base URL in development: `http://localhost:3000`
 
 - `GET /api/subscriptions`
 - `POST /api/subscriptions/subscribe`
+- `GET /api/billing/plans`
+- `GET /api/billing/current-plan`
+- `GET /api/billing/usage`
+- `GET /api/billing/invoices`
+- `GET /api/billing/notifications`
+- `POST /api/billing/upgrade`
+- `POST /api/billing/downgrade`
+- `POST /api/billing/cancel`
+- `POST /api/billing/reactivate`
 - `GET /api/payments/paystack/public-key`
 - `POST /api/payments/paystack/initialize`
 - `POST /api/webhooks/paystack`
@@ -303,6 +314,11 @@ The PostgreSQL schema is migration-based. Major tables include:
 - `users`: SME accounts, profile details, subscription fields, WhatsApp/AI flags.
 - `admin_users`: platform admin accounts.
 - `subscriptions`: user plans, billing state, Paystack metadata.
+- `subscription_plans`: SaaS plan catalog, limits, and feature flags.
+- `organization_subscriptions`: workspace subscription lifecycle, billing cycle, renewal, and provider references.
+- `usage_metrics`: monthly usage counters for feature limits.
+- `billing_invoices`: SaaS billing invoice history, separate from customer invoices.
+- `billing_notifications`: billing and usage notices.
 - `customers`: customer profiles and milestone fields.
 - `invoices`: invoice header records.
 - `invoice_items`: product-level invoice lines.

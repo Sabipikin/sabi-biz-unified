@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware, adminMiddleware } = require('../middleware/auth');
 const adminService = require('../services/adminService');
+const billingService = require('../services/billingService');
 
 router.use(authMiddleware, adminMiddleware);
 
@@ -120,6 +121,15 @@ router.get('/analytics/subscriptions', async (req, res, next) => {
   try {
     const subscriptionStats = await adminService.getSubscriptionsSummary();
     res.json({ success: true, data: subscriptionStats });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/analytics/billing', async (req, res, next) => {
+  try {
+    const billing = await billingService.getAdminAnalytics();
+    res.json({ success: true, data: billing });
   } catch (err) {
     next(err);
   }

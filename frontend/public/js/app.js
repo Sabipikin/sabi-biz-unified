@@ -283,6 +283,26 @@ const API = {
     }),
   },
 
+  billing: {
+    currentPlan: () => API.request('/api/billing/current-plan'),
+    usage: () => API.request('/api/billing/usage'),
+    invoices: () => API.request('/api/billing/invoices'),
+    upgrade: (data) => API.request('/api/billing/upgrade', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    downgrade: (data) => API.request('/api/billing/downgrade', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    cancel: () => API.request('/api/billing/cancel', {
+      method: 'POST',
+    }),
+    reactivate: () => API.request('/api/billing/reactivate', {
+      method: 'POST',
+    }),
+  },
+
   payments: {
     initializePaystack: (data) => API.request('/api/payments/paystack/initialize', {
       method: 'POST',
@@ -905,7 +925,7 @@ function renderDashboardShell() {
           </a>
           <a href="#/subscriptions" data-route="subscriptions" class="nav-item">
             <span class="nav-icon">🎁</span>
-            <span>Subscriptions</span>
+            <span>Billing</span>
           </a>
           <a href="#/settings" data-route="settings" class="nav-item">
             <span class="nav-icon">⚙️</span>
@@ -3963,69 +3983,145 @@ function renderInvoiceDraft(invoiceDraft) {
 }
 
 async function renderSubscriptions() {
-  const response = await API.subscriptions.list();
-  const subscriptions = getResponseData(response);
-  const error = getResponseError(response, 'Subscriptions could not be loaded.');
+  const [currentRes, invoicesRes] = await Promise.all([
+    API.billing.currentPlan(),
+    API.billing.invoices(),
+  ]);
+  const payload = getResponseData(currentRes, { subscription: null, plans: [], usage: {} });
+  const invoices = getResponseData(invoicesRes, []);
+  const error = getResponseError(currentRes, 'Billing details could not be loaded.') || getResponseError(invoicesRes, 'Billing history could not be loaded.');
+  const subscription = payload.subscription || {};
+  const plans = payload.plans || [];
+  const usage = payload.usage || {};
+  const billingCycle = subscription.billing_cycle || 'monthly';
 
   document.getElementById('content').innerHTML = `
     <div class="panel">
       <div class="panel-header">
         <div>
-          <h2>Subscriptions</h2>
-          <p>Review your plan history or start a monthly plan.</p>
+          <h2>Billing</h2>
+          <p>Manage your plan, usage, Paystack billing, and invoice history.</p>
         </div>
       </div>
-      <form id="subscriptionForm" class="form-grid">
-        <div class="form-group">
-          <label for="plan">Plan</label>
-          <select id="plan" name="plan" required>
-            <option value="starter">Starter - NGN 2,990/mo</option>
-            <option value="growth">Growth - NGN 4,990/mo</option>
-            <option value="pro">Pro - NGN 9,990/mo</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="paymentMethod">Payment Method</label>
-          <select id="paymentMethod" name="paymentMethod">
-            <option value="manual">Manual</option>
-            <option value="paystack">Paystack</option>
-          </select>
-        </div>
-        <button type="submit" class="btn-primary form-action">Start Subscription</button>
-      </form>
       ${error ? renderSectionError(error) : ''}
-      ${renderSubscriptionTable(subscriptions)}
+
+      <div class="billing-summary">
+        <div class="overview-card">
+          <h4>Current Plan</h4>
+          <p>${escapeHtml(subscription.plan_name || 'Trial')}</p>
+          <span class="status ${escapeHtml(subscription.status || 'trialing')}">${escapeHtml(subscription.status || 'trialing')}</span>
+        </div>
+        <div class="overview-card">
+          <h4>Billing Cycle</h4>
+          <p>${escapeHtml(billingCycle)}</p>
+        </div>
+        <div class="overview-card">
+          <h4>Renewal Date</h4>
+          <p>${subscription.next_billing_date ? formatDate(subscription.next_billing_date) : '-'}</p>
+        </div>
+      </div>
+
+      <div class="subsection compact-overview">
+        <h3>Usage</h3>
+        <div class="usage-grid">
+          ${renderUsageMetric('Users', usage.users)}
+          ${renderUsageMetric('Conversations', usage.conversations)}
+          ${renderUsageMetric('AI Assistants', usage.ai_assistants)}
+          ${renderUsageMetric('WhatsApp Numbers', usage.whatsapp_numbers)}
+        </div>
+      </div>
+
+      <div class="subsection compact-overview">
+        <div class="panel-header nested">
+          <div>
+            <h3>Plans</h3>
+            <p>Switch monthly or yearly plans. Checkout is powered by Paystack.</p>
+          </div>
+          <select id="billingCycleSelect" class="compact-select">
+            <option value="monthly" ${billingCycle === 'monthly' ? 'selected' : ''}>Monthly</option>
+            <option value="yearly" ${billingCycle === 'yearly' ? 'selected' : ''}>Yearly</option>
+          </select>
+        </div>
+        <div class="pricing-grid">
+          ${plans.map(plan => renderPricingCard(plan, subscription, billingCycle)).join('')}
+        </div>
+      </div>
+
+      <div class="subsection compact-overview">
+        <h3>Billing History</h3>
+        ${renderBillingInvoiceTable(invoices)}
+      </div>
     </div>
   `;
 
-  document.getElementById('subscriptionForm').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
-    setButtonLoading(submitButton, true, 'Starting...');
-    const formData = Object.fromEntries(new FormData(event.currentTarget).entries());
-    const result = formData.paymentMethod === 'paystack'
-      ? await API.payments.initializePaystack({ plan: formData.plan })
-      : await API.subscriptions.subscribe(formData);
+  document.querySelectorAll('[data-billing-plan]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const plan = button.dataset.billingPlan;
+      const cycle = document.getElementById('billingCycleSelect')?.value || 'monthly';
+      const currentPrice = Number(subscription[cycle === 'yearly' ? 'yearly_price' : 'monthly_price'] || 0);
+      const targetPrice = Number(button.dataset.planPrice || 0);
+      const action = targetPrice < currentPrice ? 'downgrade' : 'upgrade';
+      setButtonLoading(button, true, 'Opening Paystack...');
+      const result = action === 'downgrade'
+        ? await API.billing.downgrade({ plan, billingCycle: cycle })
+        : await API.billing.upgrade({ plan, billingCycle: cycle });
 
-    if (result?.success) {
+      if (!result?.success) {
+        notify(result?.message || 'Unable to start Paystack checkout.', 'error');
+        setButtonLoading(button, false);
+        return;
+      }
       const paymentUrl = result.data?.authorization_url;
       if (paymentUrl) {
         window.location.href = paymentUrl;
         return;
       }
-
-      notify('Subscription started.');
+      notify('Plan change created.');
       await renderSubscriptions();
-    } else {
-      notify(result?.message || 'Unable to start subscription.', 'error');
-      setButtonLoading(submitButton, false);
-    }
+    });
   });
 }
 
-function renderSubscriptionTable(subscriptions) {
-  if (!subscriptions.length) {
-    return '<div class="empty-state">No subscriptions yet.</div>';
+function renderUsageMetric(label, metric = {}) {
+  const used = Number(metric.used || 0);
+  const limit = metric.limit === null || metric.limit === undefined ? null : Number(metric.limit);
+  const percent = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const displayLimit = limit === null ? 'Unlimited' : limit.toLocaleString();
+  return `
+    <div class="usage-card">
+      <div class="usage-card-top">
+        <strong>${escapeHtml(label)}</strong>
+        <span>${used.toLocaleString()} / ${displayLimit}</span>
+      </div>
+      <div class="usage-progress"><span style="width:${percent}%"></span></div>
+    </div>
+  `;
+}
+
+function renderPricingCard(plan, subscription, billingCycle) {
+  const price = Number(billingCycle === 'yearly' ? plan.yearly_price : plan.monthly_price || 0);
+  const isCurrent = subscription.plan_slug === plan.slug;
+  const isEnterprise = plan.slug === 'enterprise';
+  return `
+    <div class="pricing-card ${isCurrent ? 'current' : ''}">
+      <h4>${escapeHtml(plan.name)}</h4>
+      <p>${escapeHtml(plan.description || '')}</p>
+      <div class="plan-price">${isEnterprise ? 'Custom' : formatMoney(price)}<span>${isEnterprise ? '' : `/${billingCycle === 'yearly' ? 'yr' : 'mo'}`}</span></div>
+      <ul>
+        <li>${plan.max_users == null ? 'Unlimited' : plan.max_users} users</li>
+        <li>${plan.max_whatsapp_numbers == null ? 'Unlimited' : plan.max_whatsapp_numbers} WhatsApp numbers</li>
+        <li>${plan.monthly_conversation_limit == null ? 'Unlimited' : Number(plan.monthly_conversation_limit).toLocaleString()} conversations/month</li>
+      </ul>
+      <button type="button" class="btn-primary" data-billing-plan="${escapeHtml(plan.slug)}" data-plan-price="${price}" ${isCurrent || isEnterprise ? 'disabled' : ''}>
+        ${isCurrent ? 'Current Plan' : isEnterprise ? 'Contact Sales' : 'Choose Plan'}
+      </button>
+    </div>
+  `;
+}
+
+function renderBillingInvoiceTable(invoices) {
+  if (!invoices.length) {
+    return '<div class="empty-state">No billing invoices yet.</div>';
   }
 
   return `
@@ -4033,21 +4129,21 @@ function renderSubscriptionTable(subscriptions) {
       <table class="data-table">
         <thead>
           <tr>
-            <th>Plan</th>
+            <th>Invoice</th>
             <th>Status</th>
-            <th>Payment</th>
-            <th>Started</th>
-            <th>Expires</th>
+            <th>Amount</th>
+            <th>Paid</th>
+            <th>Created</th>
           </tr>
         </thead>
         <tbody>
-          ${subscriptions.map(subscription => `
+          ${invoices.map(invoice => `
             <tr>
-              <td>${escapeHtml(subscription.plan || '-')}</td>
-              <td><span class="status ${escapeHtml(subscription.status || 'draft')}">${escapeHtml(subscription.status || '-')}</span></td>
-              <td>${escapeHtml(subscription.payment_method || '-')}</td>
-              <td>${formatDate(subscription.started_at || subscription.created_at)}</td>
-              <td>${formatDate(subscription.expires_at)}</td>
+              <td>${escapeHtml(invoice.invoice_number || invoice.id)}</td>
+              <td><span class="status ${escapeHtml(invoice.status || 'pending')}">${escapeHtml(invoice.status || 'pending')}</span></td>
+              <td>${formatMoney(invoice.amount)}</td>
+              <td>${invoice.paid_at ? formatDate(invoice.paid_at) : '-'}</td>
+              <td>${formatDate(invoice.created_at)}</td>
             </tr>
           `).join('')}
         </tbody>

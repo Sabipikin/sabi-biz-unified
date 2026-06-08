@@ -1299,6 +1299,74 @@ html, body {
   margin-bottom: 16px;
 }
 
+.billing-summary,
+.usage-grid,
+.pricing-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.usage-card,
+.pricing-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.pricing-card.current {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+}
+
+.usage-card-top,
+.panel-header.nested {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usage-progress {
+  background: var(--gray-200);
+  border-radius: 999px;
+  height: 10px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.usage-progress span {
+  background: var(--primary);
+  display: block;
+  height: 100%;
+}
+
+.plan-price {
+  font-size: 1.5rem;
+  font-weight: 800;
+  margin: 12px 0;
+}
+
+.plan-price span {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.pricing-card ul {
+  color: var(--text-muted);
+  margin: 0 0 16px 18px;
+}
+
+.compact-select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  padding: 10px 12px;
+}
+
 .theme-options {
   display: grid;
   gap: 12px;

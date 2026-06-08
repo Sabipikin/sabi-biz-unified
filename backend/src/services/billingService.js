@@ -193,6 +193,48 @@ class BillingService {
        RETURNING *`,
       [userId, metricType, increment, period.month, period.year]
     );
+    await this.maybeCreateUsageNotification(userId, metricType, Number(result.rows[0]?.metric_value || 0)).catch(err => {
+      logger.warn('Failed to create usage notification', { error: err.message, userId, metricType });
+    });
+    return result.rows[0];
+  }
+
+  async maybeCreateUsageNotification(userId, metricType, used) {
+    const subscription = await this.getCurrentSubscription(userId);
+    const limitColumn = metricMap[metricType];
+    const limit = subscription?.[limitColumn];
+    if (!limit || Number(limit) <= 0) return null;
+
+    const percent = (used / Number(limit)) * 100;
+    const threshold = percent >= 100 ? '100' : percent >= 80 ? '80' : null;
+    if (!threshold) return null;
+
+    const type = `usage_${metricType}_${threshold}`;
+    const existing = await query(
+      `SELECT id
+       FROM billing_notifications
+       WHERE organization_id = $1
+         AND notification_type = $2
+         AND EXTRACT(MONTH FROM created_at) = $3
+         AND EXTRACT(YEAR FROM created_at) = $4
+       LIMIT 1`,
+      [userId, type, getPeriod().month, getPeriod().year]
+    );
+    if (existing.rows[0]) return existing.rows[0];
+
+    const result = await query(
+      `INSERT INTO billing_notifications (
+         organization_id, notification_type, channel, title, message, created_at
+       )
+       VALUES ($1, $2, 'in_app', $3, $4, NOW())
+       RETURNING *`,
+      [
+        userId,
+        type,
+        `Usage reached ${threshold}%`,
+        `${metricType.replace(/_/g, ' ')} usage is at ${used.toLocaleString()} of ${Number(limit).toLocaleString()}.`,
+      ]
+    );
     return result.rows[0];
   }
 
@@ -301,6 +343,18 @@ class BillingService {
        WHERE organization_id = $1
        ORDER BY created_at DESC
        LIMIT 100`,
+      [userId]
+    );
+    return result.rows;
+  }
+
+  async listNotifications(userId) {
+    const result = await query(
+      `SELECT *
+       FROM billing_notifications
+       WHERE organization_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
       [userId]
     );
     return result.rows;

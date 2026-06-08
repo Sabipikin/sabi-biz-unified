@@ -41,6 +41,15 @@ router.get('/invoices', async (req, res, next) => {
   }
 });
 
+router.get('/notifications', async (req, res, next) => {
+  try {
+    const notifications = await billingService.listNotifications(req.user.userId || req.user.id);
+    res.json({ success: true, data: notifications });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/upgrade', async (req, res, next) => {
   try {
     const result = await billingService.createPendingPlanChange(req.user.userId || req.user.id, {

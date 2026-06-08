@@ -186,15 +186,17 @@ function renderLoading(message = 'Loading...') {
 async function loadDashboard() {
   renderLoading('Loading dashboard...');
 
-  const [overviewRes, revenueRes, subscriptionsRes] = await Promise.all([
+  const [overviewRes, revenueRes, subscriptionsRes, billingRes] = await Promise.all([
     AdminAPI.analytics.dashboard(),
     AdminAPI.analytics.revenue(),
     AdminAPI.analytics.subscriptions(),
+    AdminAPI.analytics.billing(),
   ]);
 
   const overview = overviewRes?.data || {};
   const revenue = revenueRes?.data || {};
   const subStats = subscriptionsRes?.data || {};
+  const billing = billingRes?.data || {};
 
   document.getElementById('content').innerHTML = `
     <div class="admin-welcome">
@@ -211,8 +213,8 @@ async function loadDashboard() {
           <p class="admin-stat-number">${overview.activeSubscriptions ?? 0}</p>
         </div>
         <div class="admin-stat-card">
-          <h3>Total Revenue</h3>
-          <p class="admin-stat-number">₦${revenue.totalRevenue?.toLocaleString() ?? '0'}</p>
+          <h3>Billing Revenue</h3>
+          <p class="admin-stat-number">₦${billing.total_revenue?.toLocaleString() ?? revenue.totalRevenue?.toLocaleString() ?? '0'}</p>
         </div>
         <div class="admin-stat-card">
           <h3>Paid Invoices</h3>
@@ -225,12 +227,12 @@ async function loadDashboard() {
           <p class="admin-stat-number">${subStats.active ?? overview.activeSubscriptions ?? 0}</p>
         </div>
         <div class="admin-stat-card">
-          <h3>Pending Subscriptions</h3>
-          <p class="admin-stat-number">${subStats.pending ?? 0}</p>
+          <h3>Trial Accounts</h3>
+          <p class="admin-stat-number">${billing.trial_accounts ?? 0}</p>
         </div>
         <div class="admin-stat-card">
-          <h3>Cancelled Subscriptions</h3>
-          <p class="admin-stat-number">${subStats.cancelled ?? 0}</p>
+          <h3>Churn Rate</h3>
+          <p class="admin-stat-number">${billing.churn_rate ?? 0}%</p>
         </div>
       </div>
 
@@ -468,13 +470,14 @@ async function loadPayments() {
 async function loadAnalytics() {
   renderLoading('Loading analytics...');
 
-  const [overviewRes, revenueRes, subscriptionsRes] = await Promise.all([
+  const [overviewRes, revenueRes, subscriptionsRes, billingRes] = await Promise.all([
     AdminAPI.analytics.dashboard(),
     AdminAPI.analytics.revenue(),
     AdminAPI.analytics.subscriptions(),
+    AdminAPI.analytics.billing(),
   ]);
 
-  if (!overviewRes?.success || !revenueRes?.success || !subscriptionsRes?.success) {
+  if (!overviewRes?.success || !revenueRes?.success || !subscriptionsRes?.success || !billingRes?.success) {
     document.getElementById('content').innerHTML = '<p class="error">Unable to load analytics.</p>';
     return;
   }
@@ -482,6 +485,14 @@ async function loadAnalytics() {
   const overview = overviewRes.data;
   const revenue = revenueRes.data;
   const subStats = subscriptionsRes.data;
+  const billing = billingRes.data;
+  const planRows = (billing.revenue_by_plan || []).map(plan => `
+    <tr>
+      <td>${plan.name}</td>
+      <td>${plan.subscriptions}</td>
+      <td>₦${Number(plan.revenue || 0).toLocaleString()}</td>
+    </tr>
+  `).join('');
 
   document.getElementById('content').innerHTML = `
     <div class="admin-section">
@@ -517,7 +528,22 @@ async function loadAnalytics() {
           <h3>Cancelled Subscriptions</h3>
           <p class="admin-stat-number">${subStats.cancelled ?? 0}</p>
         </div>
+        <div class="admin-stat-card">
+          <h3>MRR</h3>
+          <p class="admin-stat-number">₦${Number(billing.mrr || 0).toLocaleString()}</p>
+        </div>
+        <div class="admin-stat-card">
+          <h3>Conversion Rate</h3>
+          <p class="admin-stat-number">${billing.conversion_rate ?? 0}%</p>
+        </div>
       </div>
+      <h3>Revenue by Plan</h3>
+      <table class="admin-table">
+        <thead>
+          <tr><th>Plan</th><th>Subscriptions</th><th>Revenue</th></tr>
+        </thead>
+        <tbody>${planRows || '<tr><td colspan="3" class="text-center">No billing revenue yet.</td></tr>'}</tbody>
+      </table>
     </div>
   `;
 }

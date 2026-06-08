@@ -32,4 +32,13 @@ export const Endpoints = {
   WHATSAPP: {
     ACCOUNTS: '/api/whatsapp/accounts',
   },
+  BILLING: {
+    CURRENT_PLAN: '/api/billing/current-plan',
+    USAGE: '/api/billing/usage',
+    INVOICES: '/api/billing/invoices',
+    UPGRADE: '/api/billing/upgrade',
+    DOWNGRADE: '/api/billing/downgrade',
+    CANCEL: '/api/billing/cancel',
+    REACTIVATE: '/api/billing/reactivate',
+  },
 };

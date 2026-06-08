@@ -83,6 +83,7 @@ const AdminAPI = {
     dashboard: () => AdminAPI.request('/api/admin/analytics/dashboard'),
     revenue: () => AdminAPI.request('/api/admin/analytics/revenue'),
     subscriptions: () => AdminAPI.request('/api/admin/analytics/subscriptions'),
+    billing: () => AdminAPI.request('/api/admin/analytics/billing'),
   },
 };
 

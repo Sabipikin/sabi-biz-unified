@@ -5,6 +5,7 @@ const router = express.Router();
 const { authMiddleware } = require('../middleware/auth');
 const whatsappService = require('../services/whatsappService');
 const whatsappAccountService = require('../services/whatsappAccountService');
+const { checkSubscription, checkUsageLimit } = require('../middleware/subscription');
 const logger = require('../config/logger');
 
 // Verify webhook for WhatsApp
@@ -41,7 +42,7 @@ router.get('/accounts', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/accounts', authMiddleware, async (req, res, next) => {
+router.post('/accounts', authMiddleware, checkSubscription, checkUsageLimit('whatsapp_numbers'), async (req, res, next) => {
   try {
     const account = await whatsappAccountService.create(req.user.userId, req.body);
     res.status(201).json({ success: true, data: account });
@@ -75,7 +76,7 @@ router.delete('/accounts/:id', authMiddleware, async (req, res, next) => {
 });
 
 // Send WhatsApp message
-router.post('/send', authMiddleware, async (req, res, next) => {
+router.post('/send', authMiddleware, checkSubscription, async (req, res, next) => {
   try {
     const { toPhone, message, useAI = false } = req.body;
     // basic phone validation (E.164-like) - allow optional + and 7-15 digits

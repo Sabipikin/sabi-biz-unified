@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/auth');
+const { checkSubscription, checkUsageLimit } = require('../middleware/subscription');
 const conversationService = require('../services/conversationService');
 
 router.get('/', authMiddleware, async (req, res, next) => {
@@ -24,7 +25,7 @@ router.get('/:id', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/', authMiddleware, async (req, res, next) => {
+router.post('/', authMiddleware, checkSubscription, async (req, res, next) => {
   try {
     const conversation = await conversationService.create(req.user.userId, req.body);
     res.status(201).json({ success: true, data: conversation });
@@ -97,7 +98,7 @@ router.put('/:id/tags', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/:id/reply', authMiddleware, async (req, res, next) => {
+router.post('/:id/reply', authMiddleware, checkSubscription, checkUsageLimit('conversations'), async (req, res, next) => {
   try {
     const message = String(req.body.message || '').trim();
     if (!message) {

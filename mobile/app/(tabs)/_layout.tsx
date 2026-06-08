@@ -9,6 +9,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="ai" options={{ title: 'AI Assistant' }} />
       <Tabs.Screen name="marketing" options={{ title: 'Campaigns' }} />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics' }} />
+      <Tabs.Screen name="subscriptions" options={{ title: 'Billing' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
     </Tabs>
   );

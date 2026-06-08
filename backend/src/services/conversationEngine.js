@@ -2,6 +2,7 @@ const { query, getClient } = require('../config/db');
 const logger = require('../config/logger');
 const aiContextGenerator = require('./aiContextGenerator');
 const conversationAIService = require('./ConversationAIService');
+const billingService = require('./billingService');
 
 function normalizePhone(phone = '') {
   return String(phone || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
@@ -240,6 +241,11 @@ class ConversationEngine {
         [unreadIncrement, conversationId, userId]
       );
       await client.query('COMMIT');
+      if (senderType === 'ai') {
+        billingService.incrementUsage(userId, 'conversations', 1).catch(err => {
+          logger.warn('Failed to increment AI conversation usage', { error: err.message, userId });
+        });
+      }
       return messageResult.rows[0];
     } catch (err) {
       await client.query('ROLLBACK');
