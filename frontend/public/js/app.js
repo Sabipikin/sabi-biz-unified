@@ -233,6 +233,11 @@ const API = {
     deleteAccount: (id) => API.request(`/api/whatsapp/accounts/${id}`, {
       method: 'DELETE',
     }),
+    embeddedConfig: () => API.request('/api/whatsapp/embedded/config'),
+    exchangeEmbeddedCode: (data) => API.request('/api/whatsapp/embedded/exchange', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   },
 
   conversations: {
@@ -4282,13 +4287,101 @@ function renderWhatsAppAccounts(accounts = []) {
   `;
 }
 
+function loadMetaSdk(appId, graphVersion) {
+  if (window.FB && typeof window.FB.login === 'function') {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const existing = document.getElementById('facebook-jssdk');
+
+    window.fbAsyncInit = function () {
+      window.FB.init({
+        appId,
+        cookie: true,
+        xfbml: false,
+        version: graphVersion || 'v17.0',
+      });
+      resolve();
+    };
+
+    if (existing) {
+      existing.addEventListener('load', () => {
+        if (window.FB && typeof window.FB.login === 'function') {
+          resolve();
+        } else {
+          reject(new Error('Meta SDK loaded without FB.login'));
+        }
+      }, { once: true });
+      existing.addEventListener('error', () => reject(new Error('Unable to load Meta SDK')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = 'facebook-jssdk';
+    script.async = true;
+    script.defer = true;
+    script.crossOrigin = 'anonymous';
+    script.src = 'https://connect.facebook.net/en_US/sdk.js';
+    script.onerror = () => reject(new Error('Unable to load Meta SDK'));
+    document.body.appendChild(script);
+  });
+}
+
+async function startEmbeddedWhatsAppSignup(config = {}) {
+  if (!config.ready) {
+    const missing = Array.isArray(config.missing) && config.missing.length
+      ? ` Missing: ${config.missing.join(', ')}`
+      : '';
+    notify(`Embedded Meta Signup is not ready yet.${missing}`, 'error');
+    return;
+  }
+
+  try {
+    await loadMetaSdk(config.appId, config.graphVersion);
+  } catch (err) {
+    notify('Meta SDK could not be loaded. Use the OAuth fallback for now.', 'error');
+    return;
+  }
+
+  window.FB.login(async (response) => {
+    const code = response?.authResponse?.code;
+    if (!code) {
+      notify('Meta signup did not return a code.', 'error');
+      return;
+    }
+
+    const result = await API.whatsapp.exchangeEmbeddedCode({
+      code,
+      state: config.state,
+    });
+
+    if (result?.success) {
+      notify('WhatsApp number connected.');
+      await renderSettings();
+    } else {
+      notify(result?.message || 'Unable to connect WhatsApp.', 'error');
+    }
+  }, {
+    config_id: config.configId,
+    response_type: 'code',
+    override_default_response_type: true,
+    extras: {
+      setup: {},
+    },
+  });
+}
+
 async function renderSettings() {
-  const [response, accountsRes] = await Promise.all([
+  const [response, accountsRes, embeddedRes] = await Promise.all([
     API.auth.me(),
     API.whatsapp.accounts(),
+    API.whatsapp.embeddedConfig(),
   ]);
   const user = response?.data || {};
   const accounts = getResponseData(accountsRes, []);
+  const embeddedSignup = getResponseData(embeddedRes, {});
+  const embeddedReady = embeddedSignup.ready === true;
   const theme = getThemePreference();
 
   document.getElementById('content').innerHTML = `
@@ -4340,8 +4433,16 @@ async function renderSettings() {
 
         <div class="settings-card">
           <h3>WhatsApp</h3>
-          <p class="form-help">Business verification is pending. Account records live here so Embedded Signup can be connected later without global WhatsApp tokens.</p>
-          <button type="button" id="connectWhatsappSoon" class="btn-primary" disabled>Connect WhatsApp (Coming Soon)</button>
+          <p class="form-help">${embeddedReady
+            ? 'Embedded Meta Signup is configured. Use this to connect your WhatsApp Business number in one guided flow.'
+            : 'Embedded Meta Signup is structured and waiting for Meta verification or app configuration.'}</p>
+          ${!embeddedReady && embeddedSignup.missing?.length
+            ? `<p class="form-help">Missing: ${embeddedSignup.missing.map(escapeHtml).join(', ')}</p>`
+            : ''}
+          <button type="button" id="connectWhatsappEmbedded" class="btn-primary" ${embeddedReady ? '' : 'disabled'}>
+            ${embeddedReady ? 'Connect WhatsApp' : 'Waiting for Meta'}
+          </button>
+          <button type="button" id="connectWhatsappOauth" class="btn-secondary">OAuth fallback</button>
           ${renderWhatsAppAccounts(accounts)}
         </div>
 
@@ -4386,6 +4487,26 @@ async function renderSettings() {
     }
     setButtonLoading(submitButton, false);
   });
+
+  const embeddedButton = document.getElementById('connectWhatsappEmbedded');
+  if (embeddedButton) {
+    embeddedButton.addEventListener('click', () => {
+      startEmbeddedWhatsAppSignup(embeddedSignup);
+    });
+  }
+
+  const oauthButton = document.getElementById('connectWhatsappOauth');
+  if (oauthButton) {
+    oauthButton.addEventListener('click', async () => {
+      const result = await API.request('/api/whatsapp/oauth/url');
+      const url = result?.data?.url;
+      if (url) {
+        window.open(url, '_blank', 'noopener');
+      } else {
+        notify(result?.message || 'Unable to start Meta OAuth.', 'error');
+      }
+    });
+  }
 
   document.querySelectorAll('input[name="theme"]').forEach(input => {
     input.addEventListener('change', () => {

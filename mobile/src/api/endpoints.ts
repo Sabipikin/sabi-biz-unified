@@ -51,6 +51,8 @@ export const Endpoints = {
   WHATSAPP: {
     ACCOUNTS: '/api/whatsapp/accounts',
     OAUTH_URL: '/api/whatsapp/oauth/url',
+    EMBEDDED_CONFIG: '/api/whatsapp/embedded/config',
+    EMBEDDED_EXCHANGE: '/api/whatsapp/embedded/exchange',
   },
   WORKFLOWS: {
     LIST: '/api/workflows',

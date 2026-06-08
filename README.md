@@ -465,6 +465,10 @@ Backend:
 - `VERIFY_TOKEN`
 - `WHATSAPP_TOKEN`
 - `PHONE_NUMBER_ID`
+- `WHATSAPP_CLIENT_ID`
+- `WHATSAPP_CLIENT_SECRET`
+- `WHATSAPP_EMBEDDED_CONFIG_ID`
+- `WHATSAPP_GRAPH_VERSION` optional, defaults to `v17.0`
 - `PAYSTACK_SECRET`
 - `PAYSTACK_PUBLIC_KEY`
 - `OPENAI_API_KEY`
@@ -473,6 +477,16 @@ Backend:
 - `RATE_LIMIT_MAX`
 
 Frontend/admin build scripts generate runtime env files from configured values.
+
+### Embedded Meta Signup
+
+The project now includes the structure for one-click WhatsApp connection while Meta verification is pending:
+
+- `GET /api/whatsapp/embedded/config` reports readiness, Meta SDK config, state, and missing environment variables.
+- `POST /api/whatsapp/embedded/exchange` accepts the Meta signup `code`, exchanges it for an access token, discovers the WhatsApp Business Account, and creates the tenant WhatsApp account record.
+- `GET /api/whatsapp/oauth/url` remains available as a fallback browser OAuth flow.
+
+Once Meta approves Embedded Signup and the app config ID is active, the customer Settings page can launch the Meta SDK flow and complete the connection through the exchange endpoint.
 
 ## Security and Reliability
 

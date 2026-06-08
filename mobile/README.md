@@ -21,6 +21,13 @@ Core features
 - Customers and Invoices list + details
 - Subscriptions and basic billing views
 - AI assistant prototypes and campaign screens
+- WhatsApp settings surface for Embedded Meta Signup readiness, OAuth fallback, and manual developer fallback
+
+WhatsApp Embedded Signup
+
+- The mobile Settings screen reads `/api/whatsapp/embedded/config` to show whether one-click WhatsApp connection is ready.
+- While Meta verification or app configuration is pending, the screen shows the missing backend environment variables and keeps OAuth/manual fallback available.
+- Once Meta Embedded Signup is active, the web SDK flow should return a signup code that the backend exchanges through `/api/whatsapp/embedded/exchange`.
 
 Project structure (high level)
 

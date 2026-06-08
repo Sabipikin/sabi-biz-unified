@@ -2,13 +2,14 @@ const axios = require('axios');
 const logger = require('../config/logger');
 
 const FB_GRAPH = 'https://graph.facebook.com';
+const FB_API_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v17.0';
 
 class WhatsAppTokenService {
   async exchangeForLongLivedToken(shortLivedToken) {
     try {
       const clientId = process.env.WHATSAPP_CLIENT_ID;
       const clientSecret = process.env.WHATSAPP_CLIENT_SECRET;
-      const resp = await axios.get(`${FB_GRAPH}/v17.0/oauth/access_token`, {
+      const resp = await axios.get(`${FB_GRAPH}/${FB_API_VERSION}/oauth/access_token`, {
         params: {
           grant_type: 'fb_exchange_token',
           client_id: clientId,
