@@ -92,6 +92,54 @@ html, body {
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
 }
 
+.admin-grid.two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin: 20px 0;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-badge.success {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+
+.status-badge.warning {
+  background: rgba(245, 158, 11, 0.14);
+  color: #92400e;
+}
+
+.logs-list {
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.log-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.log-row:last-child {
+  border-bottom: none;
+}
+
+@media (max-width: 900px) {
+  .admin-grid.two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
 .password-field {
   position: relative;
   display: flex;

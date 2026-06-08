@@ -5,6 +5,7 @@ const router = express.Router();
 const { authMiddleware, adminMiddleware } = require('../middleware/auth');
 const adminService = require('../services/adminService');
 const billingService = require('../services/billingService');
+const whatsappOnboardingService = require('../services/whatsappOnboardingService');
 
 router.use(authMiddleware, adminMiddleware);
 
@@ -140,6 +141,15 @@ router.get('/whatsapp/accounts', async (req, res, next) => {
   try {
     const accounts = await adminService.getWhatsappAccounts();
     res.json({ success: true, data: accounts });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/whatsapp/infrastructure', async (req, res, next) => {
+  try {
+    const health = await whatsappOnboardingService.adminHealth();
+    res.json({ success: true, data: health });
   } catch (err) {
     next(err);
   }

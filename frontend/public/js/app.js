@@ -420,6 +420,11 @@ function isRegisterPath() {
   return path === 'register' || path.endsWith('/register.html');
 }
 
+function isWhatsAppConnectPath() {
+  const path = window.location.pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
+  return path === 'settings/whatsapp/connect' || path.endsWith('/settings/whatsapp/connect');
+}
+
 function redirectDashboardHashToAppShell(route) {
   const appUrl = window.SABIBIZ_APP_URL || `${window.location.origin}/`;
   const target = new URL(appUrl, window.location.href);
@@ -428,6 +433,10 @@ function redirectDashboardHashToAppShell(route) {
 }
 
 function getCurrentPage() {
+  if (isWhatsAppConnectPath()) {
+    return 'whatsapp-connect';
+  }
+
   if (window.location.hash) {
     return getCurrentRoute().page;
   }
@@ -840,6 +849,11 @@ function validateCustomerForm(form) {
 function renderApp() {
   applyTheme();
   const page = getCurrentPage();
+
+  if (page === 'whatsapp-connect') {
+    renderHostedWhatsAppConnect();
+    return;
+  }
 
   if (window.location.hash && isRegisterPath() && dashboardRoutes.has(page)) {
     redirectDashboardHashToAppShell(page);
@@ -4369,6 +4383,97 @@ async function startEmbeddedWhatsAppSignup(config = {}) {
     extras: {
       setup: {},
     },
+  });
+}
+
+async function renderHostedWhatsAppConnect() {
+  const tokenFromUrl = new URLSearchParams(window.location.search).get('token');
+  const returnUrl = new URLSearchParams(window.location.search).get('returnUrl');
+
+  if (tokenFromUrl) {
+    localStorage.setItem('token', tokenFromUrl);
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete('token');
+    window.history.replaceState({}, document.title, cleanUrl.toString());
+  }
+
+  app.innerHTML = `
+    <main class="connect-shell">
+      <section class="connect-panel">
+        <h1>Connect WhatsApp</h1>
+        <p id="connectStatusText">Checking your WhatsApp connection status...</p>
+        <div id="connectContent" class="connect-content">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </section>
+    </main>
+  `;
+
+  if (!isLoggedIn()) {
+    document.getElementById('connectStatusText').textContent = 'Sign in to continue connecting WhatsApp.';
+    document.getElementById('connectContent').innerHTML = `
+      <button type="button" id="hostedLoginButton" class="btn-primary">Sign in</button>
+    `;
+    document.getElementById('hostedLoginButton')?.addEventListener('click', () => {
+      localStorage.setItem(pendingRouteKey, '#/settings');
+      window.location.href = `${window.location.origin}/#/login`;
+    });
+    return;
+  }
+
+  const [statusRes, readinessRes] = await Promise.all([
+    API.request('/api/whatsapp/onboarding/status'),
+    API.request('/api/whatsapp/onboarding/readiness'),
+  ]);
+  const status = getResponseData(statusRes, {});
+  const readiness = getResponseData(readinessRes, {});
+  const accounts = status.accounts || [];
+  const missing = readiness.missing || [];
+  const embeddedReady = readiness.checks?.embedded_signup_ready;
+
+  document.getElementById('connectStatusText').textContent = accounts.some(account => account.status === 'connected')
+    ? 'Your WhatsApp connection is active.'
+    : 'Choose the best available connection method.';
+
+  document.getElementById('connectContent').innerHTML = `
+    <div class="connect-card">
+      <h2>Connection Status</h2>
+      <p>${status.status || 'disconnected'}</p>
+    </div>
+    <div class="connect-card">
+      <h2>One-click Connection</h2>
+      <p>${embeddedReady ? 'Embedded Meta Signup is ready.' : 'Meta verification or app configuration is still pending.'}</p>
+      ${missing.length ? `<ul>${missing.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}
+      <div class="button-row">
+        <button type="button" id="hostedEmbeddedButton" class="btn-primary" ${embeddedReady ? '' : 'disabled'}>${embeddedReady ? 'Connect WhatsApp' : 'Waiting for Meta'}</button>
+        <button type="button" id="hostedOAuthButton" class="btn-secondary">Use OAuth fallback</button>
+      </div>
+    </div>
+    <div class="connect-card">
+      <h2>Connected Numbers</h2>
+      ${renderWhatsAppAccounts(accounts)}
+    </div>
+    ${returnUrl ? '<button type="button" id="returnToMobileButton" class="btn-secondary">Return to app</button>' : ''}
+  `;
+
+  document.getElementById('hostedEmbeddedButton')?.addEventListener('click', async () => {
+    const configRes = await API.whatsapp.embeddedConfig();
+    const config = getResponseData(configRes, {});
+    await startEmbeddedWhatsAppSignup(config);
+  });
+
+  document.getElementById('hostedOAuthButton')?.addEventListener('click', async () => {
+    const result = await API.request('/api/whatsapp/oauth/url');
+    const url = result?.data?.url;
+    if (url) {
+      window.location.href = url;
+    } else {
+      notify(result?.message || 'Unable to start Meta OAuth.', 'error');
+    }
+  });
+
+  document.getElementById('returnToMobileButton')?.addEventListener('click', () => {
+    window.location.href = returnUrl;
   });
 }
 

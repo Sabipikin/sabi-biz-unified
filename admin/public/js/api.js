@@ -88,6 +88,7 @@ const AdminAPI = {
   // WhatsApp admin tools
   whatsapp: {
     accounts: () => AdminAPI.request('/api/admin/whatsapp/accounts'),
+    infrastructure: () => AdminAPI.request('/api/admin/whatsapp/infrastructure'),
     accountLogs: (id) => AdminAPI.request(`/api/admin/whatsapp/accounts/${id}/logs`),
     removeAccount: (id) => AdminAPI.request(`/api/admin/whatsapp/accounts/${id}`, { method: 'DELETE' }),
   },

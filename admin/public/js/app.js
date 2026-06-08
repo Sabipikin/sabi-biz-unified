@@ -700,11 +700,28 @@ async function navigate() {
 async function loadWhatsappAccounts() {
   renderLoading('Loading WhatsApp accounts...');
 
-  const response = await AdminAPI.whatsapp.accounts();
-  if (!response?.success) {
+  const [response, infraResponse] = await Promise.all([
+    AdminAPI.whatsapp.accounts(),
+    AdminAPI.whatsapp.infrastructure(),
+  ]);
+  if (!response?.success || !infraResponse?.success) {
     document.getElementById('content').innerHTML = '<p class="error">Unable to load WhatsApp accounts.</p>';
     return;
   }
+
+  const infra = infraResponse.data || {};
+  const readiness = infra.readiness || {};
+  const env = readiness.env || {};
+  const stats = infra.statistics || {};
+  const tokenHealth = infra.token_health || {};
+  const webhookHealth = infra.webhook_health || {};
+  const infraLogs = Array.isArray(infra.logs) ? infra.logs : [];
+  const envRows = Object.entries(env).map(([name, value]) => `
+    <tr>
+      <td>${name}</td>
+      <td><span class="status-badge ${value ? 'success' : 'warning'}">${value ? 'Configured' : 'Missing'}</span></td>
+    </tr>
+  `).join('');
 
   const rows = response.data.map(acc => {
     const connectedAt = acc.connected_at ? new Date(acc.connected_at).toLocaleString() : '-';
@@ -725,12 +742,36 @@ async function loadWhatsappAccounts() {
 
   document.getElementById('content').innerHTML = `
     <div class="admin-section">
-      <h2>Connected WhatsApp Numbers</h2>
-      <p>Manage WhatsApp Business Accounts connected by customers.</p>
+      <h2>WhatsApp Infrastructure</h2>
+      <p>Monitor Meta readiness, environment configuration, token health, webhooks, and connected customer numbers.</p>
+      <div class="stats-grid">
+        <div class="stat-card"><h3>Meta Readiness</h3><p>${readiness.status || '-'}</p><small>Verification: ${readiness.verification_state || 'pending'}</small></div>
+        <div class="stat-card"><h3>Accounts</h3><p>${stats.connected || 0} connected</p><small>${stats.pending || 0} pending, ${stats.disconnected || 0} disconnected</small></div>
+        <div class="stat-card"><h3>Token Health</h3><p>${tokenHealth.valid_tokens || 0} valid</p><small>${tokenHealth.expiring_tokens || 0} expiring, ${tokenHealth.expired_tokens || 0} expired</small></div>
+        <div class="stat-card"><h3>Webhook</h3><p>${webhookHealth.verification_status || '-'}</p><small>Last: ${webhookHealth.last_webhook ? new Date(webhookHealth.last_webhook).toLocaleString() : '-'}</small></div>
+      </div>
+      <div class="admin-grid two-col">
+        <div>
+          <h3>Environment Status</h3>
+          <table class="admin-table"><tbody>${envRows}</tbody></table>
+        </div>
+        <div>
+          <h3>Connection Logs</h3>
+          <div class="logs-list">
+            ${infraLogs.length ? infraLogs.slice(0, 12).map(log => `
+              <div class="log-row">
+                <strong>${log.status || '-'}</strong> - ${log.event || ''}
+                <br><small>${log.tenant || '-'} - ${log.at ? new Date(log.at).toLocaleString() : '-'}</small>
+              </div>
+            `).join('') : '<p>No connection logs yet.</p>'}
+          </div>
+        </div>
+      </div>
       <div style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
         <button id="connectWhatsappOauth" class="btn-primary">Connect via Meta (OAuth)</button>
         <small style="color:#666;">Opens Meta consent in a new tab for connecting a WhatsApp Business account</small>
       </div>
+      <h3>Connected WhatsApp Numbers</h3>
       <table class="admin-table">
         <thead>
           <tr><th>Owner</th><th>Display Number</th><th>Phone ID</th><th>Status</th><th>Connected At</th><th>Action</th></tr>

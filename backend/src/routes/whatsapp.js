@@ -9,6 +9,7 @@ const whatsappService = require('../services/whatsappService');
 const whatsappAccountService = require('../services/whatsappAccountService');
 const oauthStateService = require('../services/oauthStateService');
 const whatsappTokenService = require('../services/whatsappTokenService');
+const whatsappOnboardingService = require('../services/whatsappOnboardingService');
 const { checkSubscription, checkPlanFeature, checkUsageLimit, enforceWritableWorkspace } = require('../middleware/subscription');
 const logger = require('../config/logger');
 
@@ -201,6 +202,41 @@ router.get('/embedded/config', authMiddleware, async (req, res, next) => {
         status: config.ready ? 'ready' : 'waiting_for_meta_setup',
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/onboarding/readiness', authMiddleware, async (req, res, next) => {
+  try {
+    res.json({ success: true, data: whatsappOnboardingService.readiness() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/onboarding/status', authMiddleware, async (req, res, next) => {
+  try {
+    const status = await whatsappOnboardingService.status(req.user.userId);
+    res.json({ success: true, data: status });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/onboarding/start', authMiddleware, checkSubscription, checkUsageLimit('whatsapp_numbers'), async (req, res, next) => {
+  try {
+    const start = await whatsappOnboardingService.start(req.user.userId);
+    res.json({ success: true, data: start });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/onboarding/callback', async (req, res, next) => {
+  try {
+    const query = new URLSearchParams(req.query).toString();
+    res.redirect(`/api/whatsapp/oauth/callback${query ? `?${query}` : ''}`);
   } catch (err) {
     next(err);
   }
