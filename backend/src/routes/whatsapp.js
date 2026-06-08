@@ -8,6 +8,7 @@ const { authMiddleware } = require('../middleware/auth');
 const whatsappService = require('../services/whatsappService');
 const whatsappAccountService = require('../services/whatsappAccountService');
 const oauthStateService = require('../services/oauthStateService');
+const whatsappTokenService = require('../services/whatsappTokenService');
 const { checkSubscription, checkPlanFeature, checkUsageLimit, enforceWritableWorkspace } = require('../middleware/subscription');
 const logger = require('../config/logger');
 
@@ -116,6 +117,20 @@ router.get('/oauth/callback', async (req, res, next) => {
       return res.status(400).send('Failed to obtain access token');
     }
 
+    // Exchange short-lived token for long-lived token (if possible)
+    let finalAccessToken = accessToken;
+    let tokenMeta = {};
+    try {
+      const exchanged = await whatsappTokenService.exchangeForLongLivedToken(accessToken);
+      if (exchanged && exchanged.access_token) {
+        finalAccessToken = exchanged.access_token;
+        tokenMeta.token_type = exchanged.token_type || null;
+        tokenMeta.expires_in = exchanged.expires_in || null;
+      }
+    } catch (err) {
+      logger.warn('Long-lived token exchange failed; using short-lived token');
+    }
+
     // Query Graph API for WhatsApp Business account and phone numbers
     const meResp = await axios.get(`${FB_GRAPH}/v17.0/me`, {
       params: {
@@ -136,15 +151,20 @@ router.get('/oauth/callback', async (req, res, next) => {
     const phoneNumberId = phone ? phone.id : null;
     const displayPhone = phone ? phone.display_phone_number : null;
 
-    // Persist or update account record
+    // Persist or update account record with token metadata
     if (userId) {
+      const tokenExpiresAt = tokenMeta.expires_in ? new Date(Date.now() + (tokenMeta.expires_in * 1000)) : null;
       // Create a connected account for the tenant
       await whatsappAccountService.create(userId, {
         business_id: userId,
         waba_id: wabaId,
         phone_number_id: phoneNumberId,
         display_phone_number: displayPhone,
-        access_token: accessToken,
+        access_token: finalAccessToken,
+        token_expires_at: tokenExpiresAt,
+        token_type: tokenMeta.token_type || null,
+        token_scope: null,
+        token_last_refreshed: tokenExpiresAt ? new Date() : null,
         status: 'connected',
       });
     } else {

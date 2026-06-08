@@ -18,11 +18,13 @@ const rateLimit = require('express-rate-limit');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const cron = require('node-cron');
+const tokenRefresher = require('./services/tokenRefresher');
 
 // ─── IMPORTS ────────────────────────────────────────────────────────────
 console.log('[STARTUP] Loading config modules...');
 const logger = require('./config/logger');
 const startupLogger = require('./config/startupLogger');
+const cryptoConfig = require('./config/crypto');
 console.log('[STARTUP] Loading db module...');
 const { query, testConnection } = require('./config/db');
 console.log('[STARTUP] Loading dbRetry module...');
@@ -240,6 +242,16 @@ cron.schedule('0 0 * * *', async () => {
   // Add subscription check logic here
 });
 
+// Refresh WhatsApp tokens daily at 02:00 UTC
+cron.schedule('0 2 * * *', async () => {
+  logger.info('Running scheduled task: WhatsApp token refresher');
+  try {
+    await tokenRefresher.refreshExpiringTokens({ days: 7, limit: 200 });
+  } catch (err) {
+    logger.error('Token refresher task failed', err?.message || err);
+  }
+});
+
 // ─── ERROR HANDLING ─────────────────────────────────────────────────────
 app.use(notFound);
 app.use(errorHandler);
@@ -264,6 +276,13 @@ try {
       logger.error('Database migration failed:', migrationResult.error);
     } else if (migrationResult.migrations > 0) {
       logger.info(`✓ Applied ${migrationResult.migrations} database migration(s)`);
+    }
+
+    // Initialize master key for token encryption (may load from KMS)
+    try {
+      await cryptoConfig.initMasterKey();
+    } catch (err) {
+      logger.warn('Failed to initialize TOKEN_MASTER_KEY from KMS:', err?.message || err);
     }
 
     const admin = await adminUserService.ensureSuperAdmin();

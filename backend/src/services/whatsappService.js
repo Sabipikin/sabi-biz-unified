@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const conversationEngine = require('./conversationEngine');
 const whatsappAccountService = require('./whatsappAccountService');
 const triggerEngine = require('./triggerEngine');
+const whatsappTokenService = require('./whatsappTokenService');
 
 class WhatsAppService {
   async handleWebhook(payload) {
@@ -81,6 +82,32 @@ class WhatsAppService {
 
     const account = await whatsappAccountService.findConnectedForUser(userId);
     if (account?.access_token && account?.phone_number_id) {
+      // Ensure token freshness: refresh if expired or near expiry (within 48 hours)
+      try {
+        const now = new Date();
+        const nearlyExpired = account.token_expires_at ? (new Date(account.token_expires_at) - now) < (48 * 60 * 60 * 1000) : false;
+        if (nearlyExpired) {
+          try {
+            const exchanged = await whatsappTokenService.exchangeForLongLivedToken(account.access_token);
+            if (exchanged && exchanged.access_token) {
+              const newExpires = exchanged.expires_in ? new Date(Date.now() + exchanged.expires_in * 1000) : null;
+              await whatsappAccountService.update(userId, account.id, {
+                access_token: exchanged.access_token,
+                token_expires_at: newExpires,
+                token_type: exchanged.token_type || null,
+                token_last_refreshed: new Date(),
+                note: 'Automated token refresh',
+              });
+              account.access_token = exchanged.access_token;
+              account.token_expires_at = newExpires;
+            }
+          } catch (err) {
+            logger.warn('Failed to refresh WhatsApp access token', err?.message || err);
+          }
+        }
+      } catch (err) {
+        logger.debug('Token refresh check failed', err?.message || err);
+      }
       try {
         const url = `https://graph.facebook.com/v17.0/${account.phone_number_id}/messages`;
         await axios.post(url, {
