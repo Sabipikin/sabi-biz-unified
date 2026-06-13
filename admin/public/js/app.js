@@ -21,6 +21,7 @@ function renderShell() {
 
         <div class="admin-navbar-menu">
           <a href="#/dashboard" data-route="dashboard">Dashboard</a>
+          <a href="#/readiness" data-route="readiness">Launch Readiness</a>
           <a href="#/users" data-route="users">Users</a>
           <a href="#/subscriptions" data-route="subscriptions">Subscriptions</a>
           <a href="#/payments" data-route="payments">Payments</a>
@@ -305,6 +306,76 @@ async function loadDashboard() {
       <td>${new Date(user.created_at).toLocaleDateString()}</td>
     </tr>
   `).join('');
+}
+
+const READINESS_MODULE_LABELS = {
+  database: 'Database',
+  auth: 'Authentication',
+  whatsapp: 'WhatsApp',
+  payments: 'Payments (Paystack)',
+  ai: 'AI Assistant (OpenAI)',
+};
+
+async function loadPlatformReadiness() {
+  renderLoading('Loading launch readiness...');
+
+  const res = await AdminAPI.platform.readiness();
+  if (!res?.success) {
+    document.getElementById('content').innerHTML = '<p class="error">Unable to load platform readiness.</p>';
+    return;
+  }
+
+  const overview = res.data || {};
+  const modules = overview.modules || {};
+  const blockers = Array.isArray(overview.blockers) ? overview.blockers : [];
+
+  const cards = Object.entries(modules).map(([key, mod]) => {
+    const label = READINESS_MODULE_LABELS[key] || key;
+    const ok = !!mod.configured && mod.status !== 'error';
+    const badgeClass = ok ? 'success' : 'warning';
+    const detail = mod.status ? mod.status.replace(/_/g, ' ') : (ok ? 'configured' : 'not configured');
+    return `
+      <div class="stat-card">
+        <h3>${label}</h3>
+        <p><span class="status-badge ${badgeClass}">${ok ? 'Ready' : 'Action needed'}</span></p>
+        <small>${detail}</small>
+      </div>
+    `;
+  }).join('');
+
+  const blockerRows = blockers.map(b => `
+    <tr>
+      <td>${READINESS_MODULE_LABELS[b.module] || b.module}</td>
+      <td>${(b.status || '').replace(/_/g, ' ')}</td>
+    </tr>
+  `).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="admin-section">
+      <h2>Launch Readiness</h2>
+      <p>Overall platform configuration status across core systems required to serve customers.</p>
+      <div class="admin-stats">
+        <div class="admin-stat-card">
+          <h3>Overall Status</h3>
+          <p class="admin-stat-number">${overview.ready ? 'Ready' : 'Not Ready'}</p>
+        </div>
+        <div class="admin-stat-card">
+          <h3>Blockers</h3>
+          <p class="admin-stat-number">${blockers.length}</p>
+        </div>
+      </div>
+      <div class="stats-grid">
+        ${cards}
+      </div>
+      ${blockers.length ? `
+        <h3>Outstanding Issues</h3>
+        <table class="admin-table">
+          <thead><tr><th>Module</th><th>Issue</th></tr></thead>
+          <tbody>${blockerRows}</tbody>
+        </table>
+      ` : '<p>All core systems are configured and ready.</p>'}
+    </div>
+  `;
 }
 
 async function loadUsers() {
@@ -685,6 +756,9 @@ async function navigate() {
       break;
     case 'whatsapp':
       await loadWhatsappAccounts();
+      break;
+    case 'readiness':
+      await loadPlatformReadiness();
       break;
     case 'automation':
       await loadAutomation();

@@ -25,6 +25,15 @@ function envStatus() {
   };
 }
 
+function tokenStatusFor(tokenExpiresAt) {
+  if (!tokenExpiresAt) return 'unknown';
+  const expiresAt = new Date(tokenExpiresAt).getTime();
+  const now = Date.now();
+  if (expiresAt <= now) return 'expired';
+  if (expiresAt - now <= 7 * 24 * 60 * 60 * 1000) return 'expiring';
+  return 'valid';
+}
+
 function readiness() {
   const env = envStatus();
   const missing = Object.entries(env)
@@ -94,21 +103,28 @@ class WhatsAppOnboardingService {
 
   async status(userId) {
     const accounts = await query(
-      `SELECT id, waba_id, phone_number_id, display_phone_number, status, connected_at, updated_at
+      `SELECT id, waba_id, phone_number_id, display_phone_number, status, connected_at, updated_at,
+              token_expires_at, webhook_subscribed, quality_rating, business_name, last_diagnostics_at,
+              connection_history
        FROM whatsapp_accounts
        WHERE user_id = $1
        ORDER BY updated_at DESC, created_at DESC`,
       [userId]
     );
 
-    const connected = accounts.rows.filter(row => row.status === 'connected');
+    const rows = accounts.rows.map(row => ({
+      ...row,
+      token_status: tokenStatusFor(row.token_expires_at),
+    }));
+
+    const connected = rows.filter(row => row.status === 'connected');
     const state = readiness();
     return {
       provider: state.provider,
       status: connected.length ? 'connected' : 'disconnected',
       verification_state: state.verification_state,
       configuration_readiness: state,
-      accounts: accounts.rows,
+      accounts: rows,
     };
   }
 

@@ -42,6 +42,17 @@ function getEmbeddedSignupConfig() {
   };
 }
 
+// Never send Meta access tokens to the browser/mobile client
+function redactAccount(account) {
+  if (!account) return account;
+  const { access_token, ...rest } = account;
+  return rest;
+}
+
+function redactAccounts(accounts) {
+  return Array.isArray(accounts) ? accounts.map(redactAccount) : accounts;
+}
+
 function pickFirstPhoneNumber(waba) {
   const numbers = waba?.phone_numbers?.data || waba?.phone_numbers || [];
   return Array.isArray(numbers) && numbers.length ? numbers[0] : null;
@@ -105,7 +116,7 @@ async function createConnectedAccount(userId, accessToken) {
   const phone = pickFirstPhoneNumber(waba);
   const tokenExpiresAt = tokenMeta.expires_in ? new Date(Date.now() + (tokenMeta.expires_in * 1000)) : null;
 
-  return whatsappAccountService.create(userId, {
+  const account = await whatsappAccountService.create(userId, {
     business_id: userId,
     waba_id: waba.id,
     phone_number_id: phone ? phone.id : null,
@@ -117,6 +128,46 @@ async function createConnectedAccount(userId, accessToken) {
     token_last_refreshed: tokenExpiresAt ? new Date() : null,
     status: 'connected',
   });
+
+  await registerWebhookAndDiagnostics(userId, account, finalAccessToken);
+
+  return whatsappAccountService.findConnectedForUser(userId);
+}
+
+// Auto-subscribe SabiReply's app to the WABA's webhook events and pull initial
+// connection diagnostics (verified name, quality rating) right after connecting.
+async function registerWebhookAndDiagnostics(userId, account, accessToken) {
+  if (!account?.waba_id) return;
+
+  let webhookSubscribed = false;
+  try {
+    const subscribeResult = await whatsappTokenService.subscribeAppToWaba(account.waba_id, accessToken);
+    webhookSubscribed = !!subscribeResult?.success;
+  } catch (err) {
+    logger.warn('Auto webhook registration failed', err?.message || err);
+  }
+
+  let phoneDetails = null;
+  if (account.phone_number_id) {
+    try {
+      phoneDetails = await whatsappTokenService.getPhoneNumberDetails(account.phone_number_id, accessToken);
+    } catch (err) {
+      logger.warn('Failed to fetch phone number diagnostics', err?.message || err);
+    }
+  }
+
+  try {
+    await whatsappAccountService.update(userId, account.id, {
+      status: 'connected',
+      webhook_subscribed: webhookSubscribed,
+      quality_rating: phoneDetails?.quality_rating || null,
+      business_name: phoneDetails?.verified_name || null,
+      last_diagnostics_at: new Date(),
+      note: webhookSubscribed ? 'Webhook auto-registered' : 'Webhook auto-registration failed',
+    });
+  } catch (err) {
+    logger.warn('Failed to persist connection diagnostics', err?.message || err);
+  }
 }
 
 // Verify webhook for WhatsApp
@@ -267,7 +318,7 @@ router.post('/embedded/exchange', authMiddleware, checkSubscription, checkUsageL
 
     const accessToken = await getAccessTokenFromCode(code, config.redirectUri);
     const account = await createConnectedAccount(req.user.userId, accessToken);
-    return res.status(201).json({ success: true, data: account });
+    return res.status(201).json({ success: true, data: redactAccount(account) });
   } catch (err) {
     if (err.message === 'No WhatsApp Business Account found') {
       return res.status(400).json({ success: false, message: err.message });
@@ -311,7 +362,7 @@ router.get('/oauth/callback', async (req, res, next) => {
 router.get('/accounts', authMiddleware, async (req, res, next) => {
   try {
     const accounts = await whatsappAccountService.list(req.user.userId);
-    res.json({ success: true, data: accounts });
+    res.json({ success: true, data: redactAccounts(accounts) });
   } catch (err) {
     next(err);
   }
@@ -320,7 +371,7 @@ router.get('/accounts', authMiddleware, async (req, res, next) => {
 router.post('/accounts', authMiddleware, checkSubscription, checkUsageLimit('whatsapp_numbers'), async (req, res, next) => {
   try {
     const account = await whatsappAccountService.create(req.user.userId, req.body);
-    res.status(201).json({ success: true, data: account });
+    res.status(201).json({ success: true, data: redactAccount(account) });
   } catch (err) {
     next(err);
   }
@@ -332,7 +383,29 @@ router.put('/accounts/:id', authMiddleware, enforceWritableWorkspace, async (req
     if (!account) {
       return res.status(404).json({ success: false, message: 'WhatsApp account not found' });
     }
-    res.json({ success: true, data: account });
+    res.json({ success: true, data: redactAccount(account) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Re-check webhook subscription and business account health on demand
+router.post('/accounts/:id/diagnostics', authMiddleware, async (req, res, next) => {
+  try {
+    const accounts = await whatsappAccountService.list(req.user.userId);
+    const account = accounts.find(a => String(a.id) === String(req.params.id));
+    if (!account) {
+      return res.status(404).json({ success: false, message: 'WhatsApp account not found' });
+    }
+    if (!account.access_token || !account.waba_id) {
+      return res.status(400).json({ success: false, message: 'Account is not connected yet.' });
+    }
+
+    await registerWebhookAndDiagnostics(req.user.userId, account, account.access_token);
+
+    const refreshed = await whatsappAccountService.list(req.user.userId);
+    const updated = refreshed.find(a => String(a.id) === String(req.params.id));
+    res.json({ success: true, data: redactAccount(updated) });
   } catch (err) {
     next(err);
   }

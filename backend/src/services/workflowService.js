@@ -42,6 +42,34 @@ class WorkflowService {
     return result.rows[0];
   }
 
+  async updateNode(workflowId, nodeId, updates = {}) {
+    const result = await query(
+      `UPDATE workflow_nodes
+       SET type = COALESCE($1, type),
+           node_type = COALESCE($2, node_type),
+           configuration = COALESCE($3, configuration),
+           position_x = COALESCE($4, position_x),
+           position_y = COALESCE($5, position_y)
+       WHERE id = $6 AND workflow_id = $7
+       RETURNING *`,
+      [
+        updates.type || null,
+        updates.node_type || null,
+        updates.configuration ? JSON.stringify(updates.configuration) : null,
+        Number.isFinite(updates.position_x) ? updates.position_x : null,
+        Number.isFinite(updates.position_y) ? updates.position_y : null,
+        nodeId,
+        workflowId,
+      ]
+    );
+    return result.rows[0] || null;
+  }
+
+  async removeNode(workflowId, nodeId) {
+    const result = await query(`DELETE FROM workflow_nodes WHERE id = $1 AND workflow_id = $2 RETURNING id`, [nodeId, workflowId]);
+    return result.rows[0] || null;
+  }
+
   async getNodes(workflowId) {
     const result = await query(`SELECT * FROM workflow_nodes WHERE workflow_id = $1`, [workflowId]);
     return result.rows;
@@ -50,6 +78,24 @@ class WorkflowService {
   async addConnection(workflowId, sourceNodeId, targetNodeId) {
     const result = await query(`INSERT INTO workflow_connections (workflow_id, source_node_id, target_node_id) VALUES ($1,$2,$3) RETURNING *`, [workflowId, sourceNodeId, targetNodeId]);
     return result.rows[0];
+  }
+
+  async getConnections(workflowId) {
+    const result = await query(`SELECT * FROM workflow_connections WHERE workflow_id = $1`, [workflowId]);
+    return result.rows;
+  }
+
+  async removeConnection(workflowId, connectionId) {
+    const result = await query(`DELETE FROM workflow_connections WHERE id = $1 AND workflow_id = $2 RETURNING id`, [connectionId, workflowId]);
+    return result.rows[0] || null;
+  }
+
+  async getGraph(workflowId) {
+    const [nodes, connections] = await Promise.all([
+      this.getNodes(workflowId),
+      this.getConnections(workflowId),
+    ]);
+    return { nodes, connections };
   }
 }
 

@@ -42,6 +42,48 @@ class WhatsAppTokenService {
       return null;
     }
   }
+
+  // Subscribe SabiReply's app to webhook events for a WhatsApp Business Account
+  async subscribeAppToWaba(wabaId, accessToken) {
+    try {
+      const resp = await axios.post(`${FB_GRAPH}/${FB_API_VERSION}/${wabaId}/subscribed_apps`, {}, {
+        params: { access_token: accessToken },
+      });
+      return resp.data;
+    } catch (err) {
+      logger.error('Failed to subscribe app to WABA webhooks', err?.response?.data || err.message);
+      return null;
+    }
+  }
+
+  // Check which apps are currently subscribed to webhook events for a WABA
+  async getSubscribedApps(wabaId, accessToken) {
+    try {
+      const resp = await axios.get(`${FB_GRAPH}/${FB_API_VERSION}/${wabaId}/subscribed_apps`, {
+        params: { access_token: accessToken },
+      });
+      return resp.data?.data || [];
+    } catch (err) {
+      logger.error('Failed to fetch subscribed apps for WABA', err?.response?.data || err.message);
+      return null;
+    }
+  }
+
+  // Fetch phone number details (verified name, quality rating) for diagnostics
+  async getPhoneNumberDetails(phoneNumberId, accessToken) {
+    try {
+      const resp = await axios.get(`${FB_GRAPH}/${FB_API_VERSION}/${phoneNumberId}`, {
+        params: {
+          access_token: accessToken,
+          fields: 'display_phone_number,verified_name,quality_rating,code_verification_status',
+        },
+      });
+      return resp.data;
+    } catch (err) {
+      logger.error('Failed to fetch phone number details', err?.response?.data || err.message);
+      return null;
+    }
+  }
 }
 
 module.exports = new WhatsAppTokenService();

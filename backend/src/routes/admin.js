@@ -6,6 +6,7 @@ const { authMiddleware, adminMiddleware } = require('../middleware/auth');
 const adminService = require('../services/adminService');
 const billingService = require('../services/billingService');
 const whatsappOnboardingService = require('../services/whatsappOnboardingService');
+const platformReadinessService = require('../services/platformReadinessService');
 
 router.use(authMiddleware, adminMiddleware);
 
@@ -13,6 +14,16 @@ router.use(authMiddleware, adminMiddleware);
 router.get('/analytics/dashboard', async (req, res, next) => {
   try {
     const overview = await adminService.getDashboardOverview();
+    res.json({ success: true, data: overview });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Platform-wide launch readiness (database, auth, WhatsApp, payments, AI)
+router.get('/platform/readiness', async (req, res, next) => {
+  try {
+    const overview = await platformReadinessService.overview();
     res.json({ success: true, data: overview });
   } catch (err) {
     next(err);

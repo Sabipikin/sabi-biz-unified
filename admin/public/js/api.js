@@ -92,6 +92,11 @@ const AdminAPI = {
     accountLogs: (id) => AdminAPI.request(`/api/admin/whatsapp/accounts/${id}/logs`),
     removeAccount: (id) => AdminAPI.request(`/api/admin/whatsapp/accounts/${id}`, { method: 'DELETE' }),
   },
+
+  // Platform launch readiness
+  platform: {
+    readiness: () => AdminAPI.request('/api/admin/platform/readiness'),
+  },
 };
 
 // Auth helpers

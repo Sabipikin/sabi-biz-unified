@@ -115,6 +115,16 @@ router.post('/leads/:id/convert', enforceWritableWorkspace, featureGate('leads')
   }
 });
 
+router.post('/broadcasts/:id/send', enforceWritableWorkspace, featureGate('broadcasts'), async (req, res, next) => {
+  try {
+    const broadcast = await productSuiteService.sendBroadcast(req.user, req.params.id);
+    if (!broadcast) return sendNotFound(res, 'broadcasts');
+    res.json({ success: true, data: broadcast });
+  } catch (err) {
+    next(err);
+  }
+});
+
 for (const resource of resourcePaths) {
   router.get(`/${resource}`, featureGate(resource), async (req, res, next) => {
     try {

@@ -1,4 +1,5 @@
 const { query, getClient } = require('../config/db');
+const { getIo } = require('../config/socket');
 const logger = require('../config/logger');
 const aiContextGenerator = require('./aiContextGenerator');
 const conversationAIService = require('./ConversationAIService');
@@ -247,7 +248,18 @@ class ConversationEngine {
           logger.warn('Failed to increment AI conversation usage', { error: err.message, userId });
         });
       }
-      return messageResult.rows[0];
+
+      const message = messageResult.rows[0];
+      getIo()?.to(`user_${userId}`).emit('inbox:update', {
+        conversationId,
+        messageId: message.id,
+        direction: message.direction,
+        senderType: message.sender_type,
+        messageText: message.message_text,
+        createdAt: message.created_at,
+      });
+
+      return message;
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

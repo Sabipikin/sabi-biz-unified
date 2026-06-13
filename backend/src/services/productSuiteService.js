@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { query } = require('../config/db');
+const whatsappService = require('./whatsappService');
 
 const RESOURCE_CONFIG = {
   leads: { table: 'leads', orgColumn: 'organization_id', orderBy: 'updated_at DESC', filters: ['status'] },
@@ -302,6 +303,80 @@ class ProductSuiteService {
       [id, organizationId]
     );
     return result.rows[0] || null;
+  }
+
+  async resolveAudience(organizationId, audience = {}) {
+    const conditions = ['user_id = $1', "phone IS NOT NULL", "phone <> ''"];
+    const params = [organizationId];
+
+    if (Array.isArray(audience?.tags) && audience.tags.length) {
+      params.push(audience.tags);
+      conditions.push(`tags && $${params.length}::text[]`);
+    }
+
+    const result = await query(
+      `SELECT id, name, phone FROM customers WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+
+    const explicitPhones = Array.isArray(audience?.phones) ? audience.phones : [];
+    const seen = new Set(result.rows.map(row => row.phone));
+    explicitPhones.forEach(phone => {
+      if (phone && !seen.has(phone)) {
+        seen.add(phone);
+        result.rows.push({ id: null, name: null, phone });
+      }
+    });
+
+    return result.rows;
+  }
+
+  async sendBroadcast(user, id) {
+    const organizationId = userIdFrom(user);
+    const broadcast = await this.get('broadcasts', user, id);
+    if (!broadcast) return null;
+
+    if (broadcast.status === 'sending' || broadcast.status === 'sent') {
+      const err = new Error('This broadcast has already been sent.');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const recipients = await this.resolveAudience(organizationId, broadcast.audience);
+    if (!recipients.length) {
+      const err = new Error('No recipients match this broadcast audience.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    await query(`UPDATE broadcasts SET status = 'sending', updated_at = NOW() WHERE id = $1`, [id]);
+
+    let sent = 0;
+    let failed = 0;
+    for (const recipient of recipients) {
+      try {
+        await whatsappService.sendMessage(organizationId, recipient.phone, broadcast.message_body, false);
+        sent += 1;
+      } catch (err) {
+        failed += 1;
+      }
+    }
+
+    const result = await query(
+      `UPDATE broadcasts
+       SET status = 'sent', sent_count = $1, failed_count = $2, scheduled_at = COALESCE(scheduled_at, NOW()), updated_at = NOW()
+       WHERE id = $3 AND organization_id = $4
+       RETURNING *`,
+      [sent, failed, id, organizationId]
+    );
+
+    await recordActivity(organizationId, userIdFrom(user), {
+      activity_type: 'broadcast_sent',
+      title: `Broadcast "${broadcast.name}" sent`,
+      metadata: { broadcast_id: id, sent, failed, total: recipients.length },
+    }).catch(() => {});
+
+    return result.rows[0];
   }
 
   async analyticsSummary(user) {

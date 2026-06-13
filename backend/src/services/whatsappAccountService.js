@@ -20,6 +20,7 @@ class WhatsAppAccountService {
     const result = await query(
       `SELECT id, user_id, business_id, waba_id, phone_number_id, display_phone_number,
               status, access_token, token_expires_at, token_type, token_scope, token_last_refreshed,
+              webhook_subscribed, quality_rating, business_name, last_diagnostics_at,
               connected_at, connection_history, created_at, updated_at
        FROM whatsapp_accounts
        WHERE user_id = $1
@@ -78,6 +79,10 @@ class WhatsAppAccountService {
            token_type = COALESCE($8, token_type),
            token_scope = COALESCE($9, token_scope),
            token_last_refreshed = COALESCE($10, token_last_refreshed),
+           webhook_subscribed = COALESCE($14, webhook_subscribed),
+           quality_rating = COALESCE($15, quality_rating),
+           business_name = COALESCE($16, business_name),
+           last_diagnostics_at = COALESCE($17, last_diagnostics_at),
            connected_at = CASE
              WHEN $5 = 'connected' AND connected_at IS NULL THEN NOW()
              WHEN $5 IN ('pending', 'disconnected', 'suspended') THEN NULL
@@ -91,6 +96,7 @@ class WhatsAppAccountService {
        WHERE id = $12 AND user_id = $13
        RETURNING id, user_id, business_id, waba_id, phone_number_id, display_phone_number,
                  status, access_token, token_expires_at, token_type, token_scope, token_last_refreshed,
+                 webhook_subscribed, quality_rating, business_name, last_diagnostics_at,
                  connected_at, connection_history, created_at, updated_at`,
       [
         data.business_id || null,
@@ -106,6 +112,10 @@ class WhatsAppAccountService {
         JSON.stringify([eventFor(status, data.note || 'Status updated')]),
         id,
         userId,
+        typeof data.webhook_subscribed === 'boolean' ? data.webhook_subscribed : null,
+        data.quality_rating || null,
+        data.business_name || null,
+        data.last_diagnostics_at || null,
       ]
     );
     const row = result.rows[0] || null;

@@ -19,7 +19,7 @@ class TriggerEngine {
           if (triggerType) {
             this.registerTrigger(triggerType, async (payload) => {
               try {
-                await workflowEngine.executeWorkflow(wf.id, { trigger: triggerType, payload });
+                await workflowEngine.executeWorkflow(wf.id, { trigger: triggerType, payload, organizationId: orgId, userId: orgId });
               } catch (err) {
                 logger.error('Trigger handler failed', err);
               }

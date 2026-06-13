@@ -37,6 +37,8 @@ function resolveApiBaseUrls() {
 
 const API_BASES = resolveApiBaseUrls();
 let API_BASE = API_BASES[0];
+let realtimeSocket = null;
+let activeConversationId = null;
 const app = document.getElementById('app');
 const defaultRoute = '#/dashboard';
 const pendingRouteKey = 'SABIBIZ_PENDING_ROUTE';
@@ -46,6 +48,7 @@ const dashboardRoutes = new Set([
   'inbox',
   'ai',
   'campaigns',
+  'workflows',
   'sales',
   'invoices',
   'inventory',
@@ -238,6 +241,63 @@ const API = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+    runDiagnostics: (id) => API.request(`/api/whatsapp/accounts/${id}/diagnostics`, {
+      method: 'POST',
+    }),
+  },
+
+  product: {
+    list: (resource, params = '') => API.request(`/api/product/${resource}${params}`),
+    get: (resource, id) => API.request(`/api/product/${resource}/${id}`),
+    create: (resource, data) => API.request(`/api/product/${resource}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    update: (resource, id, data) => API.request(`/api/product/${resource}/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+    remove: (resource, id) => API.request(`/api/product/${resource}/${id}`, {
+      method: 'DELETE',
+    }),
+    sendBroadcast: (id) => API.request(`/api/product/broadcasts/${id}/send`, {
+      method: 'POST',
+    }),
+  },
+
+  workflows: {
+    list: () => API.request('/api/workflows'),
+    get: (id) => API.request(`/api/workflows/${id}`),
+    create: (data) => API.request('/api/workflows', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    update: (id, data) => API.request(`/api/workflows/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+    remove: (id) => API.request(`/api/workflows/${id}`, {
+      method: 'DELETE',
+    }),
+    graph: (id) => API.request(`/api/workflows/${id}/graph`),
+    addNode: (id, data) => API.request(`/api/workflows/${id}/nodes`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    updateNode: (id, nodeId, data) => API.request(`/api/workflows/${id}/nodes/${nodeId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+    removeNode: (id, nodeId) => API.request(`/api/workflows/${id}/nodes/${nodeId}`, {
+      method: 'DELETE',
+    }),
+    addConnection: (id, data) => API.request(`/api/workflows/${id}/connections`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    removeConnection: (id, connectionId) => API.request(`/api/workflows/${id}/connections/${connectionId}`, {
+      method: 'DELETE',
+    }),
   },
 
   conversations: {
@@ -263,6 +323,10 @@ const API = {
     }),
     addNote: (id, data) => API.request(`/api/conversations/${id}/notes`, {
       method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    updateTags: (id, data) => API.request(`/api/conversations/${id}/tags`, {
+      method: 'PUT',
       body: JSON.stringify(data),
     }),
   },
@@ -326,6 +390,53 @@ function setToken(token) {
 
 function getToken() {
   return localStorage.getItem('token');
+}
+
+function getCurrentUserId() {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload.userId || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function initRealtimeInbox() {
+  if (realtimeSocket || typeof window === 'undefined') return;
+  const userId = getCurrentUserId();
+  if (!userId) return;
+
+  if (typeof window.io === 'function') {
+    connectRealtimeInbox(userId);
+    return;
+  }
+
+  const script = document.createElement('script');
+  script.src = `${API_BASE}/socket.io/socket.io.js`;
+  script.onload = () => connectRealtimeInbox(userId);
+  script.onerror = () => console.warn('Realtime inbox unavailable');
+  document.head.appendChild(script);
+}
+
+function connectRealtimeInbox(userId) {
+  if (realtimeSocket || typeof window.io !== 'function') return;
+  realtimeSocket = window.io(API_BASE, { transports: ['websocket', 'polling'] });
+
+  realtimeSocket.on('connect', () => {
+    realtimeSocket.emit('join_user_room', userId);
+  });
+
+  realtimeSocket.on('inbox:update', async (payload) => {
+    const route = getCurrentRoute();
+    if (route.page !== 'inbox' && route.page !== 'whatsapp') return;
+
+    await renderWhatsApp();
+    if (payload?.conversationId && payload.conversationId === activeConversationId) {
+      await loadConversationDetail(payload.conversationId);
+    }
+  });
 }
 
 function logout() {
@@ -879,6 +990,7 @@ function renderApp() {
     if (!document.querySelector('.dashboard')) {
       renderDashboardShell();
     }
+    initRealtimeInbox();
     navigateDashboard(page);
   } else if (dashboardRoutes.has(page)) {
     localStorage.setItem(pendingRouteKey, getRouteHash(page));
@@ -941,6 +1053,10 @@ function renderDashboardShell() {
           <a href="#/campaigns" data-route="campaigns" class="nav-item">
             <span class="nav-icon">CA</span>
             <span>Campaigns</span>
+          </a>
+          <a href="#/workflows" data-route="workflows" class="nav-item">
+            <span class="nav-icon">WF</span>
+            <span>Workflows</span>
           </a>
           <a href="#/subscriptions" data-route="subscriptions" class="nav-item">
             <span class="nav-icon">🎁</span>
@@ -1207,6 +1323,12 @@ async function navigateDashboard(route) {
     await renderAiAssistant();
   } else if (route === 'campaigns') {
     await renderCampaigns();
+  } else if (route === 'workflows') {
+    if (routeInfo.id) {
+      await renderWorkflowBuilder(routeInfo.id);
+    } else {
+      await renderWorkflows();
+    }
   } else if (route === 'invoices') {
     await renderInvoices();
   } else if (route === 'inventory') {
@@ -3764,13 +3886,80 @@ async function renderWhatsAppLegacy() {
   });
 }
 
+const INBOX_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'unread', label: 'Unread' },
+  { id: 'needs_human', label: 'Needs human' },
+  { id: 'mine', label: 'Assigned to me' },
+  { id: 'unassigned', label: 'Unassigned' },
+  { id: 'resolved', label: 'Resolved' },
+];
+
+let inboxConversations = [];
+let inboxFilter = 'all';
+let inboxSearch = '';
+
+function applyInboxFilters(conversations) {
+  const currentUserId = getCurrentUserId();
+  const search = inboxSearch.trim().toLowerCase();
+
+  return conversations.filter(conversation => {
+    switch (inboxFilter) {
+      case 'unread':
+        if (!Number(conversation.unread_count || 0)) return false;
+        break;
+      case 'needs_human':
+        if (conversation.ai_status !== 'human_takeover' && conversation.status !== 'needs_human' && conversation.human_state !== 'human_escalated') return false;
+        break;
+      case 'mine':
+        if (!conversation.assigned_to || conversation.assigned_to !== currentUserId) return false;
+        break;
+      case 'unassigned':
+        if (conversation.assigned_to) return false;
+        break;
+      case 'resolved':
+        if (conversation.status !== 'resolved' && conversation.status !== 'closed') return false;
+        break;
+      default:
+        break;
+    }
+
+    if (!search) return true;
+    const haystack = [
+      conversation.customer_name,
+      conversation.contact_name,
+      conversation.external_contact_phone,
+      conversation.last_message_text,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(search);
+  });
+}
+
+function refreshInboxListView(selectedId) {
+  const listEl = document.getElementById('conversationList');
+  if (!listEl) return;
+  const filtered = applyInboxFilters(inboxConversations);
+  listEl.innerHTML = renderConversationList(filtered, selectedId);
+}
+
+async function refreshInboxAfterAction(conversationId) {
+  const response = await API.conversations.list();
+  const payload = getResponseData(response, { summary: {}, conversations: [] });
+  inboxConversations = payload.conversations || [];
+  refreshInboxListView(conversationId);
+  await loadConversationDetail(conversationId);
+}
+
 async function renderWhatsApp() {
   const response = await API.conversations.list();
   const payload = getResponseData(response, { summary: {}, conversations: [] });
   const error = getResponseError(response, 'Conversations could not be loaded.');
   const summary = payload.summary || {};
-  const conversations = payload.conversations || [];
-  const selectedId = conversations[0]?.id || null;
+  inboxConversations = payload.conversations || [];
+  const filtered = applyInboxFilters(inboxConversations);
+  const selectedId = activeConversationId && filtered.some(c => c.id === activeConversationId)
+    ? activeConversationId
+    : (filtered[0]?.id || null);
 
   document.getElementById('content').innerHTML = `
     <div class="panel">
@@ -3801,17 +3990,42 @@ async function renderWhatsApp() {
         </div>
       </div>
       <div class="conversation-dashboard">
-        <aside class="conversation-list" id="conversationList">
-          ${renderConversationList(conversations, selectedId)}
+        <aside class="conversation-sidebar" id="conversationListPanel">
+          <div class="conversation-filters">
+            <input type="search" id="conversationSearch" placeholder="Search conversations..." value="${escapeHtml(inboxSearch)}">
+            <div class="conversation-filter-tabs">
+              ${INBOX_FILTERS.map(filter => `
+                <button type="button" class="filter-tab ${filter.id === inboxFilter ? 'active' : ''}" data-filter="${filter.id}">${escapeHtml(filter.label)}</button>
+              `).join('')}
+            </div>
+          </div>
+          <div class="conversation-list" id="conversationList">
+            ${renderConversationList(filtered, selectedId)}
+          </div>
         </aside>
         <section class="conversation-detail" id="conversationDetail">
-          ${selectedId ? '<div class="empty-state">Loading conversation...</div>' : '<div class="empty-state">No conversations yet. Incoming WhatsApp messages will appear here after the webhook receives them.</div>'}
+          ${selectedId ? '<div class="empty-state">Loading conversation...</div>' : '<div class="empty-state">No conversations match this view.</div>'}
         </section>
       </div>
     </div>
   `;
 
   document.getElementById('refreshConversations')?.addEventListener('click', renderWhatsApp);
+
+  document.getElementById('conversationSearch')?.addEventListener('input', (event) => {
+    inboxSearch = event.target.value || '';
+    refreshInboxListView(activeConversationId);
+  });
+
+  document.querySelectorAll('.filter-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      inboxFilter = tab.dataset.filter;
+      document.querySelectorAll('.filter-tab').forEach(el => el.classList.remove('active'));
+      tab.classList.add('active');
+      refreshInboxListView(activeConversationId);
+    });
+  });
+
   document.getElementById('conversationList')?.addEventListener('click', async (event) => {
     const item = event.target.closest('[data-conversation-id]');
     if (!item) return;
@@ -3831,7 +4045,7 @@ async function renderInbox() {
 
 function renderConversationList(conversations, selectedId) {
   if (!conversations.length) {
-    return '<div class="empty-state">No active chats.</div>';
+    return '<div class="empty-state">No conversations match this view.</div>';
   }
 
   return conversations.map(conversation => `
@@ -3852,6 +4066,7 @@ function renderConversationList(conversations, selectedId) {
 async function loadConversationDetail(conversationId) {
   const container = document.getElementById('conversationDetail');
   if (!container) return;
+  activeConversationId = conversationId;
   container.innerHTML = '<div class="empty-state">Loading conversation...</div>';
 
   const response = await API.conversations.detail(conversationId);
@@ -3867,7 +4082,7 @@ async function loadConversationDetail(conversationId) {
     const result = await API.conversations.assign(conversation.id, {});
     if (result?.success) {
       notify('Conversation assigned for human takeover.');
-      await renderWhatsApp();
+      await refreshInboxAfterAction(conversation.id);
     } else {
       notify(result?.message || 'Unable to assign conversation.', 'error');
     }
@@ -3877,7 +4092,7 @@ async function loadConversationDetail(conversationId) {
     const result = await API.conversations.resumeAi(conversation.id);
     if (result?.success) {
       notify('AI resumed for this conversation.');
-      await renderInbox();
+      await refreshInboxAfterAction(conversation.id);
     } else {
       notify(result?.message || 'Unable to resume AI.', 'error');
     }
@@ -3887,7 +4102,7 @@ async function loadConversationDetail(conversationId) {
     const result = await API.conversations.close(conversation.id);
     if (result?.success) {
       notify('Conversation resolved.');
-      await renderInbox();
+      await refreshInboxAfterAction(conversation.id);
     } else {
       notify(result?.message || 'Unable to close conversation.', 'error');
     }
@@ -3929,6 +4144,25 @@ async function loadConversationDetail(conversationId) {
     }
     setButtonLoading(submitButton, false);
   });
+
+  document.getElementById('conversationTagsForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Saving...');
+    const tags = document.getElementById('conversationTagsInput').value
+      .split(',')
+      .map(tag => tag.trim())
+      .filter(Boolean);
+
+    const result = await API.conversations.updateTags(conversation.id, { tags });
+    if (result?.success) {
+      notify('Tags updated.');
+      await loadConversationDetail(conversation.id);
+    } else {
+      notify(result?.message || 'Unable to update tags.', 'error');
+    }
+    setButtonLoading(submitButton, false);
+  });
 }
 
 function renderConversationDetail(conversation) {
@@ -3960,6 +4194,10 @@ function renderConversationDetail(conversation) {
       <div>
         <h4>Tags</h4>
         <p>${tags.length ? tags.map(tag => `<span class="status">${escapeHtml(tag)}</span>`).join(' ') : 'No tags yet'}</p>
+        <form id="conversationTagsForm" class="conversation-tags-form">
+          <input type="text" id="conversationTagsInput" placeholder="vip, follow-up, complaint" value="${escapeHtml(tags.join(', '))}">
+          <button type="submit" class="btn secondary">Save tags</button>
+        </form>
       </div>
     </div>
     ${invoiceDraft ? renderInvoiceDraft(invoiceDraft) : ''}
@@ -4256,18 +4494,713 @@ async function renderAiAssistant() {
   });
 }
 
+function broadcastStatusLabel(status) {
+  const labels = {
+    draft: 'Draft',
+    sending: 'Sending',
+    sent: 'Sent',
+    failed: 'Failed',
+  };
+  return labels[status] || capitalize(status || 'draft');
+}
+
+function renderBroadcastsTable(broadcasts) {
+  if (!broadcasts || !broadcasts.length) {
+    return '<div class="empty-state">No broadcasts yet. Create one above to message your customers on WhatsApp.</div>';
+  }
+
+  return `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Audience</th>
+            <th>Status</th>
+            <th>Sent</th>
+            <th>Failed</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${broadcasts.map(broadcast => {
+            const audience = broadcast.audience || {};
+            const audienceLabel = Array.isArray(audience.tags) && audience.tags.length
+              ? `Tags: ${audience.tags.join(', ')}`
+              : 'All customers';
+            const canSend = broadcast.status === 'draft' || broadcast.status === 'failed';
+            return `
+            <tr>
+              <td>${escapeHtml(broadcast.name)}</td>
+              <td>${escapeHtml(audienceLabel)}</td>
+              <td><span class="status ${escapeHtml(broadcast.status || 'draft')}">${escapeHtml(broadcastStatusLabel(broadcast.status))}</span></td>
+              <td>${Number(broadcast.sent_count || 0)}</td>
+              <td>${Number(broadcast.failed_count || 0)}</td>
+              <td>${formatDate(broadcast.created_at)}</td>
+              <td>
+                ${canSend ? `<button type="button" class="btn-secondary send-broadcast-btn" data-id="${escapeHtml(broadcast.id)}">Send now</button>` : ''}
+              </td>
+            </tr>
+          `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 async function renderCampaigns() {
   document.getElementById('content').innerHTML = `
     <div class="panel">
       <div class="panel-header">
         <div>
           <h2>Campaigns</h2>
-          <p>Broadcasts and segmented WhatsApp campaigns are coming soon.</p>
+          <p>Loading broadcasts...</p>
         </div>
       </div>
-      <div class="empty-state">Campaigns will use the same customer intelligence, WhatsApp accounts, and AI settings already prepared in this phase.</div>
+      <div class="inventory-loading">
+        <div class="spinner"></div>
+        <p>Fetching campaign data…</p>
+      </div>
     </div>
   `;
+
+  const response = await API.product.list('broadcasts');
+  const broadcasts = getResponseData(response, []);
+  const error = getResponseError(response, 'Broadcasts could not be loaded.');
+
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Campaigns</h2>
+          <p>Send WhatsApp broadcasts to all customers or a tagged segment.</p>
+        </div>
+      </div>
+      <form id="broadcastForm" class="form-grid">
+        <div class="form-group form-span">
+          <label for="broadcastName">Broadcast name</label>
+          <input id="broadcastName" name="name" required placeholder="e.g. June promo">
+        </div>
+        <div class="form-group form-span">
+          <label for="broadcastMessage">Message</label>
+          <textarea id="broadcastMessage" name="message_body" rows="4" required placeholder="Hi {{name}}, we have a new offer for you..."></textarea>
+        </div>
+        <div class="form-group form-span">
+          <label for="broadcastTags">Audience tags (optional, comma-separated)</label>
+          <input id="broadcastTags" name="tags" placeholder="Leave blank to send to all customers with a phone number">
+        </div>
+        <button type="submit" class="btn-primary form-action">Create broadcast</button>
+      </form>
+      ${error ? renderSectionError(error) + `
+        <div class="panel-actions"><button id="retryCampaigns" class="btn">Retry</button></div>
+      ` : renderBroadcastsTable(broadcasts)}
+    </div>
+  `;
+
+  document.getElementById('broadcastForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    clearFieldErrors(form);
+
+    const name = form.name.value.trim();
+    const messageBody = form.message_body.value.trim();
+    const tags = form.tags.value.split(',').map(t => t.trim()).filter(Boolean);
+
+    if (!name) {
+      setFieldError(form.name, 'Broadcast name is required.');
+      notify('Please fix the highlighted fields.', 'error');
+      form.name.focus();
+      return;
+    }
+    if (!messageBody) {
+      setFieldError(form.message_body, 'Message is required.');
+      notify('Please fix the highlighted fields.', 'error');
+      form.message_body.focus();
+      return;
+    }
+
+    const submitButton = form.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Saving...');
+    const result = await API.product.create('broadcasts', {
+      name,
+      message_body: messageBody,
+      audience: tags.length ? { tags } : {},
+      status: 'draft',
+    });
+    setButtonLoading(submitButton, false);
+
+    if (result?.success) {
+      notify('Broadcast created.');
+      await renderCampaigns();
+    } else {
+      notify(result?.message || 'Unable to create broadcast.', 'error');
+    }
+  });
+
+  document.querySelectorAll('.send-broadcast-btn').forEach(button => {
+    button.addEventListener('click', async () => {
+      const id = button.getAttribute('data-id');
+      if (!window.confirm('Send this broadcast now? This will message all matching customers.')) return;
+      setButtonLoading(button, true, 'Sending...');
+      const result = await API.product.sendBroadcast(id);
+      setButtonLoading(button, false);
+      if (result?.success) {
+        notify('Broadcast sent.');
+        await renderCampaigns();
+      } else {
+        notify(result?.message || 'Unable to send broadcast.', 'error');
+      }
+    });
+  });
+
+  document.getElementById('retryCampaigns')?.addEventListener('click', async () => {
+    await renderCampaigns();
+  });
+}
+
+const WORKFLOW_NODE_TYPES = {
+  trigger: {
+    label: 'Trigger',
+    options: [
+      { value: 'new_message', label: 'New WhatsApp message' },
+      { value: 'new_lead', label: 'New lead created' },
+    ],
+    field: 'trigger_type',
+    fieldLabel: 'Trigger type',
+  },
+  condition: {
+    label: 'Condition',
+    options: [
+      { value: 'message_contains', label: 'Message contains keyword' },
+      { value: 'contact_tag', label: 'Contact has tag' },
+      { value: 'lead_score', label: 'Lead score at least' },
+      { value: 'lead_status', label: 'Lead status equals' },
+    ],
+    field: 'condition_type',
+    fieldLabel: 'Condition type',
+  },
+  action: {
+    label: 'Action',
+    options: [
+      { value: 'send_message', label: 'Send WhatsApp message' },
+      { value: 'add_tag', label: 'Add tag to contact' },
+      { value: 'create_task', label: 'Create task' },
+      { value: 'notify_user', label: 'Notify team' },
+    ],
+    field: 'action_type',
+    fieldLabel: 'Action type',
+  },
+};
+
+const WORKFLOW_NODE_EXTRA_FIELDS = {
+  message_contains: [{ key: 'keyword', label: 'Keyword', placeholder: 'e.g. price' }],
+  contact_tag: [{ key: 'tag', label: 'Tag', placeholder: 'e.g. vip' }],
+  lead_score: [{ key: 'min', label: 'Minimum score', placeholder: 'e.g. 50' }],
+  lead_status: [{ key: 'status', label: 'Status', placeholder: 'e.g. won' }],
+  send_message: [
+    { key: 'to', label: 'Recipient phone (optional, defaults to contact)', placeholder: '+234...' },
+    { key: 'message', label: 'Message', placeholder: 'Message to send', textarea: true },
+  ],
+  add_tag: [
+    { key: 'contact_id', label: 'Contact ID', placeholder: 'Customer ID' },
+    { key: 'tag', label: 'Tag', placeholder: 'e.g. vip' },
+  ],
+  create_task: [
+    { key: 'title', label: 'Task title', placeholder: 'e.g. Follow up with customer' },
+    { key: 'description', label: 'Description', placeholder: 'Optional details', textarea: true },
+  ],
+  notify_user: [{ key: 'message', label: 'Notification message', placeholder: 'e.g. New high-value lead', textarea: true }],
+};
+
+function workflowNodeSummary(node) {
+  const def = WORKFLOW_NODE_TYPES[node.type];
+  const subtype = node.configuration?.[def?.field];
+  const option = def?.options.find(o => o.value === subtype);
+  return option?.label || subtype || def?.label || node.type;
+}
+
+async function renderWorkflows() {
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Workflows</h2>
+          <p>Loading workflows...</p>
+        </div>
+      </div>
+      <div class="inventory-loading">
+        <div class="spinner"></div>
+        <p>Fetching workflows…</p>
+      </div>
+    </div>
+  `;
+
+  const response = await API.workflows.list();
+  const workflows = getResponseData(response, []);
+  const error = getResponseError(response, 'Workflows could not be loaded.');
+
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Workflows</h2>
+          <p>Build automations that react to new messages and leads with a drag-and-drop canvas.</p>
+        </div>
+      </div>
+      <form id="workflowForm" class="form-grid">
+        <div class="form-group form-span">
+          <label for="workflowName">Workflow name</label>
+          <input id="workflowName" name="name" required placeholder="e.g. Welcome new leads">
+        </div>
+        <div class="form-group form-span">
+          <label for="workflowDescription">Description (optional)</label>
+          <input id="workflowDescription" name="description" placeholder="What does this workflow do?">
+        </div>
+        <button type="submit" class="btn-primary form-action">Create workflow</button>
+      </form>
+      ${error ? renderSectionError(error) + `
+        <div class="panel-actions"><button id="retryWorkflows" class="btn">Retry</button></div>
+      ` : renderWorkflowsTable(workflows)}
+    </div>
+  `;
+
+  document.getElementById('workflowForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    clearFieldErrors(form);
+
+    const name = form.name.value.trim();
+    if (!name) {
+      setFieldError(form.name, 'Workflow name is required.');
+      notify('Please fix the highlighted fields.', 'error');
+      form.name.focus();
+      return;
+    }
+
+    const submitButton = form.querySelector('button[type="submit"]');
+    setButtonLoading(submitButton, true, 'Saving...');
+    const result = await API.workflows.create({
+      name,
+      description: form.description.value.trim() || null,
+      status: 'draft',
+    });
+    setButtonLoading(submitButton, false);
+
+    if (result?.success) {
+      notify('Workflow created.');
+      window.location.hash = `#/workflows/${result.data.id}`;
+    } else {
+      notify(result?.message || 'Unable to create workflow.', 'error');
+    }
+  });
+
+  document.querySelectorAll('.workflow-toggle-btn').forEach(button => {
+    button.addEventListener('click', async () => {
+      const id = button.getAttribute('data-id');
+      const nextStatus = button.getAttribute('data-next-status');
+      setButtonLoading(button, true, 'Saving...');
+      const result = await API.workflows.update(id, { status: nextStatus });
+      setButtonLoading(button, false);
+      if (result?.success) {
+        notify(nextStatus === 'active' ? 'Workflow activated.' : 'Workflow paused.');
+        await renderWorkflows();
+      } else {
+        notify(result?.message || 'Unable to update workflow.', 'error');
+      }
+    });
+  });
+
+  document.querySelectorAll('.workflow-delete-btn').forEach(button => {
+    button.addEventListener('click', async () => {
+      const id = button.getAttribute('data-id');
+      if (!window.confirm('Delete this workflow? This cannot be undone.')) return;
+      setButtonLoading(button, true, 'Deleting...');
+      const result = await API.workflows.remove(id);
+      setButtonLoading(button, false);
+      if (result?.success) {
+        notify('Workflow deleted.');
+        await renderWorkflows();
+      } else {
+        notify(result?.message || 'Unable to delete workflow.', 'error');
+      }
+    });
+  });
+
+  document.getElementById('retryWorkflows')?.addEventListener('click', async () => {
+    await renderWorkflows();
+  });
+}
+
+function renderWorkflowsTable(workflows) {
+  if (!workflows || !workflows.length) {
+    return '<div class="empty-state">No workflows yet. Create one above to start automating.</div>';
+  }
+
+  return `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Status</th>
+            <th>Updated</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${workflows.map(wf => {
+            const isActive = wf.status === 'active';
+            return `
+            <tr>
+              <td><a href="#/workflows/${escapeHtml(wf.id)}">${escapeHtml(wf.name)}</a></td>
+              <td>${escapeHtml(wf.description || '-')}</td>
+              <td><span class="status ${isActive ? 'connected' : 'draft'}">${isActive ? 'Active' : 'Draft'}</span></td>
+              <td>${formatDate(wf.updated_at)}</td>
+              <td>
+                <button type="button" class="btn-secondary workflow-toggle-btn" data-id="${escapeHtml(wf.id)}" data-next-status="${isActive ? 'draft' : 'active'}">${isActive ? 'Pause' : 'Activate'}</button>
+                <button type="button" class="btn-secondary workflow-delete-btn" data-id="${escapeHtml(wf.id)}">Delete</button>
+              </td>
+            </tr>
+          `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function renderWorkflowBuilder(id) {
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Workflow Builder</h2>
+          <p>Loading workflow...</p>
+        </div>
+      </div>
+      <div class="inventory-loading">
+        <div class="spinner"></div>
+        <p>Fetching workflow…</p>
+      </div>
+    </div>
+  `;
+
+  const [workflowRes, graphRes] = await Promise.all([
+    API.workflows.get(id),
+    API.workflows.graph(id),
+  ]);
+
+  if (!workflowRes?.success) {
+    document.getElementById('content').innerHTML = `
+      <div class="panel">
+        <div class="panel-header">
+          <div><h2>Workflow Builder</h2></div>
+        </div>
+        ${renderSectionError(getResponseError(workflowRes, 'Workflow could not be loaded.'))}
+        <div class="panel-actions"><a href="#/workflows" class="btn">Back to workflows</a></div>
+      </div>
+    `;
+    return;
+  }
+
+  const workflow = workflowRes.data;
+  const graph = getResponseData(graphRes, { nodes: [], connections: [] });
+  const nodes = graph.nodes || [];
+  const connections = graph.connections || [];
+  const isActive = workflow.status === 'active';
+
+  const paletteButtons = Object.entries(WORKFLOW_NODE_TYPES).map(([type, def]) => `
+    <button type="button" class="btn-secondary add-node-btn" data-type="${type}">+ ${escapeHtml(def.label)}</button>
+  `).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>${escapeHtml(workflow.name)}</h2>
+          <p>${escapeHtml(workflow.description || 'Drag nodes onto the canvas, then connect them to build your automation.')}</p>
+        </div>
+        <div class="panel-actions">
+          <a href="#/workflows" class="btn">Back to workflows</a>
+          <button type="button" id="workflowActivateBtn" class="btn-primary" data-next-status="${isActive ? 'draft' : 'active'}">${isActive ? 'Pause workflow' : 'Activate workflow'}</button>
+        </div>
+      </div>
+      <div class="workflow-builder">
+        <div class="workflow-palette">
+          <h3>Add a node</h3>
+          ${paletteButtons}
+          <div id="connectModeStatus" class="muted" style="margin-top:8px;"></div>
+          <button type="button" id="connectModeBtn" class="btn-secondary" style="margin-top:8px;">Connect nodes</button>
+          <div class="workflow-node-config" id="nodeConfigPanel"></div>
+        </div>
+        <div class="workflow-canvas-wrap">
+          <svg id="workflowConnections" class="workflow-connections"></svg>
+          <div id="workflowCanvas" class="workflow-canvas">
+            ${nodes.map(node => renderWorkflowNode(node)).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  let connectMode = false;
+  let connectSource = null;
+
+  function setConnectStatus(text) {
+    const el = document.getElementById('connectModeStatus');
+    if (el) el.textContent = text;
+  }
+
+  function drawConnections() {
+    const svg = document.getElementById('workflowConnections');
+    const canvas = document.getElementById('workflowCanvas');
+    if (!svg || !canvas) return;
+    svg.setAttribute('width', canvas.scrollWidth);
+    svg.setAttribute('height', canvas.scrollHeight);
+    svg.innerHTML = connections.map(conn => {
+      const source = nodes.find(n => n.id === conn.source_node_id);
+      const target = nodes.find(n => n.id === conn.target_node_id);
+      if (!source || !target) return '';
+      const x1 = (source.position_x || 0) + 90;
+      const y1 = (source.position_y || 0) + 30;
+      const x2 = (target.position_x || 0) + 90;
+      const y2 = (target.position_y || 0) + 30;
+      return `<line data-connection-id="${conn.id}" class="workflow-connection-line" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)" />`;
+    }).join('') + `
+      <defs>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L6,3 z" fill="#94a3b8" />
+        </marker>
+      </defs>
+    `;
+
+    svg.querySelectorAll('.workflow-connection-line').forEach(line => {
+      line.addEventListener('click', async () => {
+        const connId = line.getAttribute('data-connection-id');
+        if (!window.confirm('Remove this connection?')) return;
+        const result = await API.workflows.removeConnection(id, connId);
+        if (result?.success) {
+          const idx = connections.findIndex(c => c.id === connId);
+          if (idx >= 0) connections.splice(idx, 1);
+          drawConnections();
+        } else {
+          notify(result?.message || 'Unable to remove connection.', 'error');
+        }
+      });
+    });
+  }
+
+  function openNodeConfig(node) {
+    const def = WORKFLOW_NODE_TYPES[node.type] || {};
+    const subtype = node.configuration?.[def.field] || '';
+    const extraFields = WORKFLOW_NODE_EXTRA_FIELDS[subtype] || [];
+
+    document.getElementById('nodeConfigPanel').innerHTML = `
+      <h3>${escapeHtml(def.label || node.type)} settings</h3>
+      <form id="nodeConfigForm" class="form-grid">
+        <div class="form-group form-span">
+          <label for="nodeSubtype">${escapeHtml(def.fieldLabel || 'Type')}</label>
+          <select id="nodeSubtype" name="subtype">
+            ${(def.options || []).map(opt => `<option value="${escapeHtml(opt.value)}" ${opt.value === subtype ? 'selected' : ''}>${escapeHtml(opt.label)}</option>`).join('')}
+          </select>
+        </div>
+        ${extraFields.map(field => `
+          <div class="form-group form-span">
+            <label for="nodeField_${escapeHtml(field.key)}">${escapeHtml(field.label)}</label>
+            ${field.textarea
+              ? `<textarea id="nodeField_${escapeHtml(field.key)}" name="${escapeHtml(field.key)}" rows="3" placeholder="${escapeHtml(field.placeholder || '')}">${escapeHtml(node.configuration?.[field.key] || '')}</textarea>`
+              : `<input id="nodeField_${escapeHtml(field.key)}" name="${escapeHtml(field.key)}" value="${escapeHtml(node.configuration?.[field.key] || '')}" placeholder="${escapeHtml(field.placeholder || '')}">`}
+          </div>
+        `).join('')}
+        <button type="submit" class="btn-primary form-action">Save node</button>
+        <button type="button" id="deleteNodeBtn" class="btn-secondary form-action">Delete node</button>
+      </form>
+    `;
+
+    document.getElementById('nodeConfigForm')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const newSubtype = form.subtype.value;
+      const configuration = { [def.field]: newSubtype };
+      (WORKFLOW_NODE_EXTRA_FIELDS[newSubtype] || []).forEach(field => {
+        configuration[field.key] = form[field.key]?.value?.trim() || '';
+      });
+
+      const submitButton = form.querySelector('button[type="submit"]');
+      setButtonLoading(submitButton, true, 'Saving...');
+      const result = await API.workflows.updateNode(id, node.id, { configuration });
+      setButtonLoading(submitButton, false);
+
+      if (result?.success) {
+        Object.assign(node.configuration, configuration);
+        notify('Node updated.');
+        const el = document.querySelector(`.workflow-node[data-node-id="${node.id}"] .workflow-node-summary`);
+        if (el) el.textContent = workflowNodeSummary(node);
+      } else {
+        notify(result?.message || 'Unable to update node.', 'error');
+      }
+    });
+
+    document.getElementById('deleteNodeBtn')?.addEventListener('click', async () => {
+      if (!window.confirm('Delete this node?')) return;
+      const result = await API.workflows.removeNode(id, node.id);
+      if (result?.success) {
+        notify('Node deleted.');
+        await renderWorkflowBuilder(id);
+      } else {
+        notify(result?.message || 'Unable to delete node.', 'error');
+      }
+    });
+  }
+
+  function bindNodeInteractions() {
+    document.querySelectorAll('.workflow-node').forEach(nodeEl => {
+      const nodeId = nodeEl.getAttribute('data-node-id');
+      const node = nodes.find(n => n.id === nodeId);
+      if (!node) return;
+
+      nodeEl.addEventListener('click', (event) => {
+        if (event.target.closest('.workflow-node-drag')) return;
+        if (connectMode) {
+          if (!connectSource) {
+            connectSource = node;
+            nodeEl.classList.add('workflow-node-selected');
+            setConnectStatus(`Select a target node to connect from "${workflowNodeSummary(node)}".`);
+          } else if (connectSource.id !== node.id) {
+            API.workflows.addConnection(id, { source_node_id: connectSource.id, target_node_id: node.id }).then(result => {
+              if (result?.success) {
+                connections.push(result.data);
+                drawConnections();
+                notify('Nodes connected.');
+              } else {
+                notify(result?.message || 'Unable to connect nodes.', 'error');
+              }
+              document.querySelectorAll('.workflow-node-selected').forEach(el => el.classList.remove('workflow-node-selected'));
+              connectSource = null;
+              setConnectStatus('Connect mode: click a node to start a connection.');
+            });
+          }
+          return;
+        }
+        document.querySelectorAll('.workflow-node').forEach(el => el.classList.remove('workflow-node-active'));
+        nodeEl.classList.add('workflow-node-active');
+        openNodeConfig(node);
+      });
+
+      const handle = nodeEl.querySelector('.workflow-node-drag');
+      handle?.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        const canvas = document.getElementById('workflowCanvas');
+        const canvasRect = canvas.getBoundingClientRect();
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const originX = node.position_x || 0;
+        const originY = node.position_y || 0;
+
+        function onMove(moveEvent) {
+          const dx = moveEvent.clientX - startX;
+          const dy = moveEvent.clientY - startY;
+          const newX = Math.max(0, originX + dx);
+          const newY = Math.max(0, originY + dy);
+          nodeEl.style.left = `${newX}px`;
+          nodeEl.style.top = `${newY}px`;
+          node.position_x = newX;
+          node.position_y = newY;
+          drawConnections();
+        }
+
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          API.workflows.updateNode(id, node.id, { position_x: Math.round(node.position_x), position_y: Math.round(node.position_y) });
+        }
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+        void canvasRect;
+      });
+    });
+  }
+
+  drawConnections();
+  bindNodeInteractions();
+
+  document.querySelectorAll('.add-node-btn').forEach(button => {
+    button.addEventListener('click', async () => {
+      const type = button.getAttribute('data-type');
+      const def = WORKFLOW_NODE_TYPES[type];
+      const defaultSubtype = def.options[0].value;
+      const result = await API.workflows.addNode(id, {
+        type,
+        node_type: type,
+        configuration: { [def.field]: defaultSubtype },
+        position_x: 40 + (nodes.length % 5) * 30,
+        position_y: 40 + Math.floor(nodes.length / 5) * 120,
+      });
+      if (result?.success) {
+        await renderWorkflowBuilder(id);
+      } else {
+        notify(result?.message || 'Unable to add node.', 'error');
+      }
+    });
+  });
+
+  document.getElementById('connectModeBtn')?.addEventListener('click', () => {
+    connectMode = !connectMode;
+    connectSource = null;
+    document.querySelectorAll('.workflow-node-selected').forEach(el => el.classList.remove('workflow-node-selected'));
+    document.getElementById('connectModeBtn').classList.toggle('btn-primary', connectMode);
+    setConnectStatus(connectMode ? 'Connect mode: click a node to start a connection.' : '');
+  });
+
+  document.getElementById('workflowActivateBtn')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const nextStatus = button.getAttribute('data-next-status');
+    setButtonLoading(button, true, 'Saving...');
+    const result = await API.workflows.update(id, { status: nextStatus });
+    setButtonLoading(button, false);
+    if (result?.success) {
+      notify(nextStatus === 'active' ? 'Workflow activated.' : 'Workflow paused.');
+      await renderWorkflowBuilder(id);
+    } else {
+      notify(result?.message || 'Unable to update workflow.', 'error');
+    }
+  });
+}
+
+function renderWorkflowNode(node) {
+  const def = WORKFLOW_NODE_TYPES[node.type] || { label: node.type };
+  return `
+    <div class="workflow-node workflow-node-${escapeHtml(node.type)}" data-node-id="${escapeHtml(node.id)}" style="left:${node.position_x || 0}px; top:${node.position_y || 0}px;">
+      <div class="workflow-node-header">
+        <span class="workflow-node-drag" title="Drag to move">⠿</span>
+        <span class="workflow-node-type">${escapeHtml(def.label)}</span>
+      </div>
+      <div class="workflow-node-summary">${escapeHtml(workflowNodeSummary(node))}</div>
+    </div>
+  `;
+}
+
+function tokenStatusLabel(tokenStatus) {
+  const labels = {
+    valid: 'Valid',
+    expiring: 'Expiring soon',
+    expired: 'Expired',
+    unknown: 'Unknown',
+  };
+  return labels[tokenStatus] || 'Unknown';
+}
+
+function computeTokenStatus(tokenExpiresAt) {
+  if (!tokenExpiresAt) return 'unknown';
+  const expiresAt = new Date(tokenExpiresAt).getTime();
+  const now = Date.now();
+  if (expiresAt <= now) return 'expired';
+  if (expiresAt - now <= 7 * 24 * 60 * 60 * 1000) return 'expiring';
+  return 'valid';
 }
 
 function renderWhatsAppAccounts(accounts = []) {
@@ -4282,23 +5215,74 @@ function renderWhatsAppAccounts(accounts = []) {
           <tr>
             <th>Number</th>
             <th>Status</th>
-            <th>Phone Number ID</th>
+            <th>Webhook</th>
+            <th>Token</th>
+            <th>Quality</th>
             <th>Connected</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
-          ${accounts.map(account => `
+          ${accounts.map(account => {
+            const tokenStatus = account.token_status || computeTokenStatus(account.token_expires_at);
+            const history = Array.isArray(account.connection_history) ? account.connection_history : [];
+            return `
             <tr>
-              <td>${escapeHtml(account.display_phone_number || '-')}</td>
+              <td>${escapeHtml(account.display_phone_number || account.business_name || '-')}</td>
               <td><span class="status ${escapeHtml(account.status || 'pending')}">${escapeHtml(account.status || 'pending')}</span></td>
-              <td>${escapeHtml(account.phone_number_id || '-')}</td>
+              <td><span class="status ${account.webhook_subscribed ? 'connected' : 'pending'}">${account.webhook_subscribed ? 'Active' : 'Not subscribed'}</span></td>
+              <td><span class="status ${escapeHtml(tokenStatus || 'unknown')}">${tokenStatusLabel(tokenStatus)}</span></td>
+              <td>${escapeHtml(account.quality_rating || '-')}</td>
               <td>${account.connected_at ? formatDate(account.connected_at) : '-'}</td>
+              <td>
+                <button type="button" class="btn-secondary run-diagnostics-btn" data-account-id="${escapeHtml(account.id)}">Run diagnostics</button>
+                ${history.length ? `<button type="button" class="btn-secondary toggle-logs-btn" data-account-id="${escapeHtml(account.id)}">View logs</button>` : ''}
+              </td>
             </tr>
-          `).join('')}
+            ${history.length ? `
+            <tr class="connection-logs-row" id="logs-${escapeHtml(account.id)}" style="display: none;">
+              <td colspan="7">
+                <ul class="connection-log-list">
+                  ${history.slice().reverse().map(event => `
+                    <li><strong>${escapeHtml(event.status || '')}</strong> — ${escapeHtml(event.note || '')} <span class="muted">${event.at ? formatDate(event.at) : ''}</span></li>
+                  `).join('')}
+                </ul>
+              </td>
+            </tr>
+            ` : ''}
+          `;
+          }).join('')}
         </tbody>
       </table>
     </div>
   `;
+}
+
+function bindWhatsAppAccountActions(onRefresh) {
+  document.querySelectorAll('.run-diagnostics-btn').forEach(button => {
+    button.addEventListener('click', async () => {
+      const id = button.getAttribute('data-account-id');
+      setButtonLoading(button, true, 'Checking...');
+      const result = await API.whatsapp.runDiagnostics(id);
+      setButtonLoading(button, false);
+      if (result?.success) {
+        notify('Connection diagnostics updated.');
+        await onRefresh();
+      } else {
+        notify(result?.message || 'Unable to run diagnostics.', 'error');
+      }
+    });
+  });
+
+  document.querySelectorAll('.toggle-logs-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      const id = button.getAttribute('data-account-id');
+      const row = document.getElementById(`logs-${id}`);
+      if (row) {
+        row.style.display = row.style.display === 'none' ? '' : 'none';
+      }
+    });
+  });
 }
 
 function loadMetaSdk(appId, graphVersion) {
@@ -4472,6 +5456,8 @@ async function renderHostedWhatsAppConnect() {
     }
   });
 
+  bindWhatsAppAccountActions(() => renderHostedWhatsAppConnect());
+
   document.getElementById('returnToMobileButton')?.addEventListener('click', () => {
     window.location.href = returnUrl;
   });
@@ -4619,6 +5605,8 @@ async function renderSettings() {
       notify('Theme preference saved.');
     });
   });
+
+  bindWhatsAppAccountActions(() => renderSettings());
 }
 
 function renderLogin() {

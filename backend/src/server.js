@@ -101,6 +101,8 @@ const io = new Server(httpServer, {
   transports: ['websocket', 'polling'],
 });
 
+require('./config/socket').setIo(io);
+
 io.on('connection', (socket) => {
   logger.debug(`Socket connected: ${socket.id}`);
 
