@@ -26,7 +26,8 @@ class TokenRefresher {
 
       for (const acct of accounts) {
         try {
-          const exchanged = await whatsappTokenService.exchangeForLongLivedToken(acct.access_token);
+          const accessToken = cryptoConfig.decrypt(acct.access_token);
+          const exchanged = await whatsappTokenService.exchangeForLongLivedToken(accessToken);
           if (exchanged && exchanged.access_token) {
             const newExpires = exchanged.expires_in ? new Date(Date.now() + exchanged.expires_in * 1000) : null;
             await whatsappAccountService.update(acct.user_id, acct.id, {
